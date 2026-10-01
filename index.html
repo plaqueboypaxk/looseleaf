@@ -1,0 +1,2643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#CBC7BF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="looseleaf">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>looseleaf — minimal player</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#CBC7BF; --slab:#E7E3DB; --ink:#111110; --red:#A3120F;
+    --text:#111110; --text-muted:#45413B; --text-faint:#5A564F; --red-ink:#8F0F0C;
+    --accent:#A3120F; --line:rgba(17,17,16,.3); --border:#111110;
+    --display:'Anton',Impact,'Arial Narrow',sans-serif;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{
+    width:100%; height:100vh; height:100dvh; height:calc(var(--app-vh,1vh)*100);
+    background:var(--bg); color:var(--text);
+    font-family:'Archivo','Helvetica Neue',Arial,sans-serif;
+    overflow-x:hidden; overflow-y:auto; overscroll-behavior:none; touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none;
+    -webkit-user-select:none; user-select:none;
+  }
+  body{
+    display:flex; align-items:center; align-items:safe center; justify-content:center;   /* safe: when zoomed in, content starts at the top and scrolls instead of being clipped */
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='.3'/></svg>");
+  }
+  :focus-visible{ outline:3px solid var(--red); outline-offset:3px; }
+  .hidden{ display:none !important; }
+  /* File inputs must NOT use display:none (what the `hidden` attribute produces) — iOS Safari
+     frequently refuses to open the native picker on a programmatic .click() for a display:none
+     input, even though the exact same code works fine on desktop and Android. This keeps the
+     element technically rendered (so iOS honors the click) while making it fully invisible. */
+  .file-input-hidden{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+  @keyframes slam{
+    0%{ clip-path:inset(0 100% 0 0); transform:translateX(-16px); }
+    100%{ clip-path:inset(0 0 0 0); transform:none; }
+  }
+  .slam{ animation:slam .24s steps(6,end) both; }
+
+  /* brand + top controls */
+  #brand{
+    position:fixed; top:calc(12px + env(safe-area-inset-top)); left:calc(clamp(14px,4vw,32px) + env(safe-area-inset-left));
+    font-family:var(--display); font-size:26px; line-height:1; text-transform:uppercase; letter-spacing:.02em; z-index:10;
+  }
+  #brand::after{ content:""; display:inline-block; width:.42em; height:.42em; background:var(--red); margin-left:6px; }
+  #topControls{
+    position:fixed; top:calc(12px + env(safe-area-inset-top)); right:calc(clamp(14px,4vw,32px) + env(safe-area-inset-right));
+    display:flex; gap:10px; z-index:10;
+  }
+  #folderBtn,#addBtn,#menuBtn{
+    width:40px; height:40px; border:3px solid var(--ink); background:var(--slab); color:var(--ink);
+    box-shadow:4px 4px 0 var(--ink); cursor:pointer; font-family:var(--display); font-size:20px; line-height:1;
+    display:flex; align-items:center; justify-content:center; touch-action:manipulation;
+    transition:transform .06s linear, box-shadow .06s linear, background .06s linear, color .06s linear;
+  }
+  #folderBtn:hover,#addBtn:hover,#menuBtn:hover{ background:var(--ink); color:var(--slab); }
+  #folderBtn:active,#addBtn:active,#menuBtn:active{ transform:translate(4px,4px); box-shadow:0 0 0 var(--ink); }
+  #libraryLabel{
+    position:fixed; bottom:calc(14px + env(safe-area-inset-bottom)); left:calc(clamp(14px,4vw,32px) + env(safe-area-inset-left));
+    font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; max-width:60vw;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  #libraryLabel:not(:empty)::before{ content:""; display:inline-block; width:9px; height:9px; background:var(--red); margin-right:8px; }
+
+  /* letter rail */
+  #letterRail{
+    position:fixed; left:calc(clamp(10px,2.4vw,28px) + env(safe-area-inset-left)); top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; gap:4px; font-family:var(--display); font-size:15px; z-index:5;
+  }
+  #letterRail .letter{ color:var(--text-muted); line-height:1; padding:3px 6px; border:2px solid transparent; }
+  #letterRail .letter.active{ color:var(--slab); background:var(--red); border-color:var(--ink); }
+
+  /* stage */
+  #stage{ position:relative; isolation:isolate; width:min(480px,86vw); display:flex; flex-direction:column; align-items:center; gap:clamp(12px,2.2vh,20px); }
+  #bigLetter{
+    position:absolute; z-index:-1; right:-4%; top:-.34em; font-family:var(--display);
+    font-size:clamp(130px,30vw,220px); line-height:1; color:var(--red); pointer-events:none;
+  }
+  #card{
+    display:flex; align-items:stretch; width:100%; background:var(--slab); border:3px solid var(--ink); box-shadow:6px 6px 0 var(--ink);
+    opacity:1; transform:translate(0,0); transition:opacity .16s linear, transform .16s linear; touch-action:pinch-zoom; will-change:transform,opacity;
+  }
+  #card.dragging{ transition:none; }
+  #card.leaving-left{ opacity:0; transform:translateX(-36px); }
+  #card.leaving-right{ opacity:0; transform:translateX(36px); }
+  #card.leaving-up{ opacity:0; transform:translateY(-30px); }
+  #card.leaving-down{ opacity:0; transform:translateY(30px); }
+  #art{ flex:0 0 auto; width:clamp(64px,17vw,92px); height:clamp(64px,17vw,92px); display:block; border-right:3px solid var(--ink); }
+  #waveWrap{ flex:1 1 auto; height:clamp(64px,17vw,92px); display:flex; align-items:center; overflow:hidden; padding:0 10px; }
+  #wave{ width:100%; height:100%; display:block; cursor:pointer; }
+
+  #info{ width:100%; display:flex; flex-direction:column; gap:2px; text-align:left; }
+  #trackIndex{ order:-2; font-size:11px; font-weight:700; letter-spacing:.06em; color:var(--text-muted); margin-bottom:6px; }
+  #artist{
+    order:-1; font-family:var(--display); font-size:clamp(18px,4vw,26px); line-height:1; text-transform:uppercase;
+    color:transparent; -webkit-text-stroke:1px var(--ink); letter-spacing:.02em;
+  }
+  #artist:empty{ display:none; }
+  #title{
+    font-family:var(--display); font-size:clamp(30px,7.5vw,52px); line-height:.95; text-transform:uppercase; letter-spacing:.005em;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere;
+  }
+  #meta{ margin-top:8px; display:flex; flex-wrap:wrap; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
+  #meta span{ border:2px solid var(--ink); padding:4px 8px; margin-right:-2px; background:var(--slab); color:var(--text-muted); }
+  #meta b{ color:var(--ink); font-weight:800; margin-left:6px; }
+  #timeReadout{ font-variant-numeric:tabular-nums; }
+
+  .peek{
+    font-family:var(--display); font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted);
+    text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%; padding:2px 0; pointer-events:none; transition:opacity .15s linear;
+  }
+
+  /* transport */
+  #transport{ display:flex; align-items:center; margin-top:4px; }
+  .tbtn{
+    border:3px solid var(--ink); margin-right:-3px; background:var(--slab); color:var(--ink); cursor:pointer; padding:9px 14px;
+    display:flex; align-items:center; justify-content:center; touch-action:manipulation; box-shadow:4px 4px 0 var(--ink);
+    transition:transform .06s linear, box-shadow .06s linear, background .06s linear, color .06s linear;
+  }
+  .tbtn:hover{ background:var(--ink); color:var(--slab); }
+  .tbtn:active{ transform:translate(4px,4px); box-shadow:0 0 0 var(--ink); }
+  .tbtn:disabled{ opacity:.35; cursor:default; box-shadow:none; }
+  .tbtn:disabled:hover{ background:var(--slab); color:var(--ink); }
+  .tbtn svg{ width:15px; height:15px; }
+  #play{ padding:10px 22px; position:relative; z-index:1; }
+  #play svg{ width:17px; height:17px; }
+  body.playing #play{ background:var(--red); color:var(--slab); }
+  body.playing #card{ box-shadow:6px 6px 0 var(--red); }
+
+  .hint{
+    position:fixed; top:50%; transform:translateY(-50%); font-family:var(--display); font-size:14px; letter-spacing:.06em; text-transform:uppercase;
+    display:flex; align-items:center; gap:4px; color:var(--text-muted); pointer-events:none; transition:color .1s linear;
+  }
+  .hint svg{ width:14px; height:14px; }
+  .hint.pulse{ color:var(--red-ink); }
+  #hintLeft{ left:calc(clamp(44px,6vw,72px) + env(safe-area-inset-left)); flex-direction:row-reverse; }
+  #hintRight{ right:calc(clamp(10px,3vw,32px) + env(safe-area-inset-right)); }
+
+  /* name gate + vault directory */
+  #empty{ display:flex; flex-direction:column; align-items:flex-start; gap:20px; width:min(520px,90vw); }
+  #nameGate,#directoryView,#vaultEmpty,#vaultNaming{ display:flex; flex-direction:column; align-items:flex-start; gap:16px; width:100%; }
+  #empty h1{ font-family:var(--display); font-weight:400; font-size:clamp(48px,14vw,96px); line-height:.92; text-transform:uppercase; }
+  #empty h1 span{ display:block; }
+  #empty h1 .ol{ color:transparent; -webkit-text-stroke:2px var(--ink); }
+  #empty p{ font-size:14px; line-height:1.5; color:var(--text-muted); max-width:44ch; }
+  #nameInput,#vaultNameInput{
+    width:100%; background:var(--slab); border:3px solid var(--ink); color:var(--ink); font-family:var(--display); font-size:28px;
+    text-transform:uppercase; padding:10px 14px; border-radius:0; letter-spacing:.02em;
+  }
+  #nameInput::placeholder{ color:var(--text-faint); }
+  #nameInput:focus,#vaultNameInput:focus{ outline:none; box-shadow:6px 6px 0 var(--red); }
+  #nameContinueBtn,#createVaultBtn,#vaultAddBtn,#vaultNameConfirmBtn{
+    font-family:var(--display); font-size:24px; letter-spacing:.03em; text-transform:uppercase; color:var(--slab); background:var(--red);
+    border:3px solid var(--ink); border-radius:0; padding:12px 26px; cursor:pointer; box-shadow:6px 6px 0 var(--ink);
+    transition:transform .06s linear, box-shadow .06s linear, background .06s linear;
+  }
+  #nameContinueBtn:hover,#createVaultBtn:hover,#vaultAddBtn:hover,#vaultNameConfirmBtn:hover{ background:var(--ink); transform:translate(-2px,-2px); box-shadow:8px 8px 0 var(--red); }
+  #nameContinueBtn:active,#createVaultBtn:active,#vaultAddBtn:active,#vaultNameConfirmBtn:active{ transform:translate(6px,6px); box-shadow:0 0 0 var(--ink); }
+  #dirRoot{
+    display:block; width:100%; text-align:left; background:none; border:none; margin:0; padding:0;
+    font-family:var(--display); font-size:clamp(40px,11vw,76px); line-height:1; text-transform:uppercase;
+    overflow-wrap:anywhere; color:inherit; cursor:pointer; touch-action:manipulation; transition:color .08s linear;
+  }
+  #dirRoot:hover, #dirRoot:focus-visible{ color:var(--red); }
+  #dirNote{ font-size:13px; font-weight:700; color:var(--red-ink); max-width:44ch; }
+  #dirNote:empty{ display:none; }
+  #vaultList{ display:flex; flex-direction:column; gap:12px; width:100%; }
+  #vaultList:empty{ display:none; }
+  .vaultRow{
+    display:flex; align-items:center; justify-content:space-between; width:100%; background:var(--slab); color:var(--ink);
+    border:3px solid var(--ink); box-shadow:6px 6px 0 var(--ink); font-family:var(--display); font-size:30px; text-transform:uppercase;
+    padding:10px 16px; cursor:pointer; transition:transform .06s linear, box-shadow .06s linear, background .06s linear, color .06s linear;
+  }
+  .vaultRow:hover{ background:var(--ink); color:var(--slab); transform:translate(-2px,-2px); box-shadow:8px 8px 0 var(--red); }
+  .vaultRow:active{ transform:translate(6px,6px); box-shadow:0 0 0 var(--ink); }
+  .vaultRow .vaultName{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vaultRow .vaultMeta{ font-family:'Archivo',sans-serif; font-size:11px; font-weight:700; letter-spacing:.08em; margin-left:12px; flex-shrink:0; opacity:.85; }
+  .vaultRow.error{ background:var(--red); color:var(--slab); }
+  .dirHint{ font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  #chooseBtn{
+    background:none; border:none; border-bottom:2px solid var(--ink); color:var(--ink); font-size:13px; font-weight:600; padding:2px 0; cursor:pointer;
+  }
+  #chooseBtn:hover{ color:var(--red-ink); border-color:var(--red-ink); }
+
+  #dropOverlay{
+    position:fixed; inset:0; background:var(--red); color:var(--slab); display:flex; align-items:center; justify-content:center;
+    font-family:var(--display); font-size:clamp(48px,12vw,120px); text-transform:uppercase; z-index:50; opacity:0; pointer-events:none; transition:opacity .1s linear;
+  }
+  #dropOverlay.active{ opacity:.96; }
+  #decodingNote{ position:fixed; bottom:calc(14px + env(safe-area-inset-bottom)); right:clamp(14px,4vw,32px); font-size:12px; font-weight:700; text-transform:uppercase; opacity:0; transition:opacity .15s linear; }
+  #decodingNote.active{ opacity:1; }
+
+  @media (max-width:480px){
+    #letterRail,#hintLeft{ display:none; }
+    #bigLetter{ right:-6%; }
+  }
+  @media (prefers-reduced-motion:reduce){
+    .slam{ animation:none; }
+    #card,.hint,.tbtn,.vaultRow{ transition:none; }
+  }
+  /* playlist */
+  #tracklist{ width:100%; max-height:clamp(96px,24dvh,220px); overflow-y:auto; touch-action:pan-y; border:3px solid var(--ink); background:var(--slab); }
+  #tracklist:empty{ display:none; }
+  .trow{ display:grid; grid-template-columns:26px 1fr auto 44px auto; gap:8px; align-items:center; width:100%; text-align:left; background:none; border:none; border-bottom:1px solid var(--line); padding:8px 10px; font-family:inherit; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--ink); cursor:pointer; }
+  .trow:last-child{ border-bottom:none; }
+  .trow:hover{ background:rgba(17,17,16,.08); }
+  .trow .tn{ color:var(--text-faint); font-variant-numeric:tabular-nums; }
+  .trow .tt{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trow .tk,.trow .tb{ color:var(--text-muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .trow .tb{ text-align:right; }
+  .trow.match .tk,.trow.match .tb{ color:var(--red); }
+  .trow.match .tt::before{ content:""; display:inline-block; width:7px; height:7px; background:var(--red); margin-right:6px; }
+  .trow.active{ background:var(--ink); color:var(--slab); }
+  .trow.active .tn,.trow.active .tk,.trow.active .tb{ color:var(--slab); }
+  /* tempo + editable chips */
+  #tempoRow{ display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  #advancedToggle{
+    margin-top:10px; align-self:flex-start; border:2px solid var(--ink); background:var(--slab); color:var(--ink);
+    font-family:'Archivo',sans-serif; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    padding:7px 10px; cursor:pointer; touch-action:manipulation; display:flex; align-items:center; gap:7px;
+    transition:background .06s linear, color .06s linear;
+  }
+  #advancedToggle:hover{ background:var(--ink); color:var(--slab); }
+  #advancedToggle::after{ content:"+"; font-family:var(--display); font-size:14px; line-height:1; }
+  #advancedToggle[aria-expanded="true"]::after{ content:"–"; }
+  #advancedPanel{ display:flex; flex-direction:column; }
+  #tempo{ flex:1; min-width:0; accent-color:var(--red); }
+  #tempoVal{ min-width:52px; text-align:right; cursor:pointer; font-variant-numeric:tabular-nums; }
+  #tempoRow button{ border:2px solid var(--ink); background:var(--slab); color:var(--ink); font:inherit; padding:3px 8px; cursor:pointer; text-transform:uppercase; touch-action:manipulation; }
+  #tempoRow button.on{ background:var(--ink); color:var(--slab); }
+  .dj{ display:flex; align-items:center; gap:6px; margin-top:6px; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  .dj>span:first-child{ min-width:34px; }
+  .dj .sp{ flex:1; }
+  .dj button{ border:2px solid var(--ink); background:var(--slab); color:var(--ink); font:inherit; padding:3px 9px; min-width:30px; cursor:pointer; text-transform:uppercase; touch-action:manipulation; }
+  .dj button.on{ background:var(--ink); color:var(--slab); }
+  .dj .pad.set{ background:var(--red); color:var(--slab); }
+  #ksVal{ min-width:28px; text-align:center; font-variant-numeric:tabular-nums; }
+  @media (pointer:coarse){ .dj button, #tempoRow button{ min-height:40px; min-width:40px; } }
+  #volRow{ display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  #vol{ flex:1; min-width:0; accent-color:var(--red); }
+  #volVal{ min-width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+  #muteBtn{ border:2px solid var(--ink); background:var(--slab); color:var(--ink); font:inherit; padding:3px 8px; cursor:pointer; text-transform:uppercase; touch-action:manipulation; }
+  #muteBtn.on{ background:var(--ink); color:var(--slab); }
+  .tbtn.on{ background:var(--ink); color:var(--slab); }
+  .tbtn.on:hover{ background:var(--red); }
+  .tbtn svg.stroke{ fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  #meta span:has(#metaKey),#meta span:has(#metaBpm){ cursor:pointer; }
+  .chipEdit{ width:7ch; font:inherit; font-weight:800; border:none; border-bottom:2px solid var(--red); background:transparent; color:var(--ink); text-transform:none; outline:none; border-radius:0; }
+  /* playlist tools + vault menu */
+  .trow[hidden]{ display:none; }
+  .tc{ display:flex; gap:4px; }
+  .tc i{ font-style:normal; padding:0 4px; opacity:.8; cursor:pointer; white-space:nowrap; }
+  .tc i:hover{ opacity:1; color:var(--red); }
+  .tc .up,.tc .dn{ display:none; }
+  #tracklist[data-mode="mine"] .tc .up,#tracklist[data-mode="mine"] .tc .dn{ display:inline; }
+  .tc .gr{ display:none; }
+  #tracklist[data-mode="mine"] .tc .gr{ display:inline; opacity:1; cursor:grab; touch-action:none; font-weight:800; padding:0 8px; }
+  .trow.dragRow{ position:relative; z-index:3; outline:3px solid var(--red); outline-offset:-3px; background:var(--slab); color:var(--ink); box-shadow:4px 4px 0 var(--ink); cursor:grabbing; }
+  .trow.dragRow .tn,.trow.dragRow .tk,.trow.dragRow .tb{ color:var(--text-muted); }
+  .trow.dropBefore{ box-shadow:inset 0 4px 0 var(--red); }
+  .trow.dropAfter{ box-shadow:inset 0 -4px 0 var(--red); }
+  #vaultMenu{ position:fixed; top:calc(64px + env(safe-area-inset-top)); right:calc(clamp(14px,4vw,32px) + env(safe-area-inset-right)); z-index:11; display:flex; flex-direction:column; gap:8px; width:230px; padding:12px; background:var(--slab); border:3px solid var(--ink); box-shadow:6px 6px 0 var(--ink); }
+  #vaultMenu input{ font:inherit; font-weight:700; padding:6px 8px; border:2px solid var(--ink); background:transparent; color:var(--ink); text-transform:uppercase; border-radius:0; }
+  #vaultMenu button{ border:2px solid var(--ink); background:var(--slab); color:var(--ink); font-family:var(--display); font-size:15px; letter-spacing:.05em; text-transform:uppercase; padding:6px; cursor:pointer; }
+  #vaultMenu button:hover{ background:var(--ink); color:var(--slab); }
+  #deleteBtn{ border-color:var(--red)!important; color:var(--red)!important; }
+  #restoreBtn,#installBtn,#tipClose{ background:none; border:none; border-bottom:2px solid var(--ink); color:var(--ink); font:600 13px 'Archivo',sans-serif; letter-spacing:.04em; text-transform:uppercase; padding:2px 0; cursor:pointer; }
+  #restoreBtn:hover,#installBtn:hover,#tipClose:hover{ color:var(--red-ink); border-color:var(--red-ink); }
+  #vaultLinkBtn,#vaultRetryBtn{ font-family:var(--display); font-size:24px; letter-spacing:.03em; text-transform:uppercase; color:var(--ink); background:var(--slab); border:3px solid var(--ink); border-radius:0; padding:12px 26px; cursor:pointer; box-shadow:6px 6px 0 var(--ink); transition:transform .06s linear, box-shadow .06s linear, background .06s linear, color .06s linear; }
+  #vaultLinkBtn:hover,#vaultRetryBtn:hover{ background:var(--ink); color:var(--slab); }
+  #vaultLinkBtn:active,#vaultRetryBtn:active{ transform:translate(6px,6px); box-shadow:0 0 0 var(--ink); }
+  #storageTip{ border:3px solid var(--ink); background:var(--slab); padding:12px 14px; display:flex; flex-direction:column; gap:10px; align-items:flex-start; max-width:46ch; box-shadow:6px 6px 0 var(--red); }
+  #empty #storageTip p{ font-size:13px; line-height:1.5; color:var(--text); }
+  #storageInfo{ font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; line-height:1.45; color:var(--text-muted); white-space:pre-line; }
+  #toast{ position:fixed; left:50%; bottom:calc(46px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:30; max-width:min(440px,90vw); background:var(--ink); color:var(--slab); font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; line-height:1.4; padding:10px 14px; border:3px solid var(--ink); box-shadow:5px 5px 0 var(--red); opacity:0; pointer-events:none; transition:opacity .12s linear; }
+  #toast.on{ opacity:1; }
+  /* camelot wheel */
+</style>
+</head>
+<body>
+
+  <div id="brand">looseleaf</div>
+  <div id="libraryLabel"></div>
+  <div id="topControls">
+    <button id="folderBtn" aria-label="Back to vaults" title="Back to your vaults">⌂</button>
+    <button id="menuBtn" class="hidden" aria-label="Vault options" title="Rename, delete or export this vault">⋯</button>
+    <button id="addBtn" class="hidden" aria-label="Add songs" title="Add songs to this vault">+</button>
+  </div>
+  <div id="vaultMenu" class="hidden"><input id="renameInput" maxlength="30" aria-label="Vault name"><button id="renameBtn">rename</button><button id="exportBtn">export list (.csv)</button><button id="backupBtn" title="Saves name, order, BPM and key fixes">back up (.json)</button><p id="storageInfo"></p><button id="relinkBtn" class="hidden">relink folder</button><button id="unhideBtn" class="hidden"></button><button id="deleteBtn" title="Removes this vault and the copies stored in this browser. Your original files are not touched.">delete vault</button></div>
+  <input type="file" id="fileInput" accept="audio/*" multiple class="file-input-hidden">
+
+  <nav id="letterRail" aria-hidden="true"></nav>
+
+
+  <div id="empty">
+    <div id="nameGate">
+      <h1 class="slam"><span>whose library</span><span class="ol">is this?</span></h1>
+      <input id="nameInput" type="text" placeholder="type a name" autocomplete="off" maxlength="30">
+      <button id="nameContinueBtn">continue</button>
+    </div>
+
+    <div id="directoryView" class="hidden">
+      <button id="dirRoot" class="slam" title="Tap to edit your name"></button>
+      <div id="vaultList"></div>
+
+      <div id="vaultNaming" class="hidden">
+        <p class="dirHint">name this vault</p>
+        <input id="vaultNameInput" type="text" autocomplete="off" maxlength="30">
+        <button id="vaultNameConfirmBtn">create</button>
+      </div>
+
+      <button id="createVaultBtn">+ create vault</button>
+      <button id="restoreBtn" title="Bring back a vault from a looseleaf backup file">restore a backup</button>
+      <input type="file" id="restoreInput" accept=".json,application/json" class="file-input-hidden">
+      <button id="installBtn" class="hidden" title="Install looseleaf so it opens like an app and keeps its storage">install app</button>
+      <p id="dirNote"></p>
+      <div id="storageTip" class="hidden" role="note"><p></p><button id="tipClose">got it</button></div>
+    </div>
+
+    <div id="vaultEmpty" class="hidden">
+      <h1><span>empty</span><span class="ol">vault</span></h1>
+      <p id="vaultEmptyMsg"></p>
+      <button id="vaultAddBtn">add songs</button>
+      <button id="vaultLinkBtn" class="hidden" title="Use a folder on this device. Nothing is copied.">link a folder</button>
+      <button id="vaultRetryBtn" class="hidden">try again</button>
+    </div>
+
+  </div>
+
+  <main id="stage" class="hidden">
+    <div id="bigLetter" aria-hidden="true"></div>
+
+    <div id="card">
+      <canvas id="art" width="200" height="200"></canvas>
+      <div id="waveWrap"><canvas id="wave"></canvas></div>
+    </div>
+
+    <div id="info">
+      <div id="trackIndex"></div>
+      <div id="title"></div>
+      <div id="artist"></div>
+      <div id="meta">
+        <span>key <b id="metaKey"></b></span>
+        <span>bpm <b id="metaBpm"></b></span>
+        <span id="timeReadout"><b id="curTime">0:00</b> / <span id="durTime">0:00</span></span>
+      </div>
+      <button id="advancedToggle" aria-expanded="false" aria-controls="advancedPanel">advanced controls</button>
+      <div id="advancedPanel" class="hidden">
+        <div id="tempoRow"><span>tempo</span><input id="tempo" type="range" min="-8" max="8" step="0.1" value="0" aria-label="Tempo"><b id="tempoVal" title="Tap to reset">+0.0%</b><button id="keyLock" class="on" title="On: tempo changes keep the key. Off: pitch follows speed.">key lock</button><button id="tapBtn" title="Tap along to set BPM">tap</button></div>
+        <div id="cueRow" class="dj"><span>cue</span><button class="pad" data-c="0">1</button><button class="pad" data-c="1">2</button><button class="pad" data-c="2">3</button><button class="pad" data-c="3">4</button><span class="sp"></span><span>grid</span><button id="gridBtn" title="Show the beat grid on the waveform">show</button><button id="gridSet" title="Beat 1 is here: aligns the grid to the song">set 1</button></div>
+        <div id="loopRow" class="dj"><span>loop</span><button id="loopIn" title="Loop start here">in</button><button id="loopOut" title="Loop end here, and start looping">out</button><button id="loopBtn" title="Loop on/off (l)">loop</button><span class="sp"></span><button class="bl" data-b="1" title="Loop 1 beat from here">1</button><button class="bl" data-b="2" title="Loop 2 beats from here">2</button><button class="bl" data-b="4" title="Loop 4 beats from here">4</button><button class="bl" data-b="8" title="Loop 8 beats from here">8</button></div>
+        <div id="shiftRow" class="dj"><span>shift</span><button id="ksDn" aria-label="Key down one semitone" title="Key down a semitone (tempo unchanged)">−</button><b id="ksVal">0</b><button id="ksUp" aria-label="Key up one semitone" title="Key up a semitone (tempo unchanged)">+</button><span class="sp"></span><button id="ksZero" title="Back to the original key">reset</button></div>
+        <div id="mixRow" class="dj"><span>mix</span><button id="autoMixBtn" title="Fade into the next song near the end of this one">auto</button><button id="fadeBtn" title="Fade length: tap to change">8s</button><span class="sp"></span><button id="mixNowBtn" title="Start the fade into the next song right now">mix now</button></div>
+        <div id="volRow"><button id="muteBtn" aria-label="Mute" title="Mute (m)">vol</button><input id="vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"><b id="volVal">100%</b></div>
+      </div>
+    </div>
+
+
+    <div id="transport">
+      <button class="tbtn" id="shuffle" aria-label="Shuffle: off" aria-pressed="false" title="Shuffle (s)">
+        <svg class="stroke" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+      </button>
+      <button class="tbtn" id="prev" aria-label="Previous track">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19 20 9 12l10-8v16zM7 4v16"/></svg>
+      </button>
+      <button class="tbtn" id="play" aria-label="Play or pause">
+        <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button class="tbtn" id="next" aria-label="Next track">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4l10 8-10 8V4zM17 4v16"/></svg>
+      </button>
+      <button class="tbtn" id="repeat" aria-label="Repeat: off" title="Repeat: off (r)">
+        <svg class="stroke" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+      </button>
+      <button class="tbtn" id="nextMatch" aria-label="Next compatible song" title="Best next song: same key first, then neighbouring keys, closest tempo, songs you haven't played yet first" style="font-family:var(--display);font-size:14px;letter-spacing:.06em">MIX</button>
+    </div>
+    <div id="tracklist"></div>
+  </main>
+
+  <div id="dropOverlay">drop to add tracks</div>
+  <div id="decodingNote">decoding waveform…</div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <audio id="audioEl" preload="metadata"></audio>
+
+<script>
+(function(){
+
+  /* ---------- state ---------- */
+  let LIBRARY = [];         // { id, title, artist, key, bpm, file, url, peaks, letter }
+  let letters = [];
+  let currentIndex = -1;
+  let wasPlayingBeforeSwitch = false;
+  let vaults = [];          // { id, name, handle } — persisted vault list
+  let pendingVaultHandle = null;
+  let justCreatedId = null;
+
+  const audioEl = document.getElementById('audioEl');
+  const stage = document.getElementById('stage');
+  const emptyState = document.getElementById('empty');
+  const decodingNote = document.getElementById('decodingNote');
+  const dropOverlay = document.getElementById('dropOverlay');
+  const libraryLabel = document.getElementById('libraryLabel');
+  const nameGate = document.getElementById('nameGate');
+  const nameInput = document.getElementById('nameInput');
+  const nameContinueBtn = document.getElementById('nameContinueBtn');
+  const directoryView = document.getElementById('directoryView');
+  const vaultEmpty = document.getElementById('vaultEmpty');
+  const dirRoot = document.getElementById('dirRoot');
+  const vaultListEl = document.getElementById('vaultList');
+  const vaultNaming = document.getElementById('vaultNaming');
+  const vaultNameInput = document.getElementById('vaultNameInput');
+  const vaultNameConfirmBtn = document.getElementById('vaultNameConfirmBtn');
+  const createVaultBtn = document.getElementById('createVaultBtn');
+  const vaultAddBtn = document.getElementById('vaultAddBtn');
+  const addBtn = document.getElementById('addBtn');
+  const listEl = document.getElementById('tracklist');
+  
+  let currentVault = null;
+  let sortMode = 'title', matchOnly = false;
+  let keyFilter = null;            // { num, minor } when the Camelot wheel is filtering the list
+  const playedKeys = new Set();    // songs already played this session (MIX prefers fresh ones)
+
+  /* ---------- shared decode context (decode only, not playback graph) ---------- */
+  let decodeCtx = null;
+  function getDecodeCtx(){
+    if(!decodeCtx) decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return decodeCtx;
+  }
+
+  /* ---------- seeded random (for procedural album art only) ---------- */
+  function seedFromString(str){
+    let h = 2166136261;
+    for(let i=0;i<str.length;i++){
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  /* ---------- procedural album art (real audio/art come later — art still generated for now) ---------- */
+  const artCanvas = document.getElementById('art');
+  const actx = artCanvas.getContext('2d');
+
+  function tonesFor(rand){
+    // A narrow charcoal band, not pure black, so tiles stay distinguishable
+    // from the page background without ever reading as "colorful."
+    const base = 9 + rand()*9;
+    return {
+      c1: `hsl(0, 0%, ${base}%)`,
+      c2: `hsl(0, 0%, ${base + 5 + rand()*7}%)`,
+    };
+  }
+
+  function drawProceduralArt(track){
+    const rand = mulberry32(seedFromString(track.title+track.artist));
+    const w = artCanvas.width, h = artCanvas.height;
+    const t = tonesFor(rand);
+
+    actx.clearRect(0,0,w,h);
+    // a near-flat fill — just enough of a gradient to read as a surface, not a graphic
+    const grad = actx.createLinearGradient(0,0,w,h);
+    grad.addColorStop(0, t.c1);
+    grad.addColorStop(1, t.c2);
+    actx.fillStyle = grad;
+    actx.fillRect(0,0,w,h);
+
+    // one quiet mark of texture per track, kept faint and monochrome
+    actx.globalAlpha = 0.04 + rand()*0.05;
+    actx.fillStyle = '#FFFFFF';
+    const rx = rand()*w, ry = rand()*h, rr = w*(0.3+rand()*0.3);
+    actx.beginPath();
+    actx.arc(rx, ry, rr, 0, Math.PI*2);
+    actx.fill();
+    actx.globalAlpha = 1;
+    actx.fillStyle = '#A3120F';
+    actx.fillRect(rand()*w*.55, rand()*h*.5, w*.3, h*.3);
+    actx.fillStyle = '#CBC7BF';
+    actx.fillRect(rand()*w*.6, h*.74, w*.36, h*.09);
+  }
+
+  function paintImageCover(img){
+    const w = artCanvas.width, h = artCanvas.height;
+    actx.clearRect(0,0,w,h);
+    const scale = Math.max(w/img.width, h/img.height);
+    const dw = img.width*scale, dh = img.height*scale;
+    const dx = (w-dw)/2, dy = (h-dh)/2;
+    actx.drawImage(img, dx, dy, dw, dh);
+  }
+
+  // Renders real embedded cover art when available, falling back to the
+  // procedural gradient (and showing that gradient as a placeholder while
+  // the real image loads, so there's never a blank tile).
+  function renderArt(track){
+    if(track.artUrl){
+      if(track.artImageEl && track.artImageEl.complete && track.artImageEl.naturalWidth){
+        paintImageCover(track.artImageEl);
+        return;
+      }
+      drawProceduralArt(track);
+      const img = new Image();
+      img.onload = ()=>{
+        track.artImageEl = img;
+        if(LIBRARY[currentIndex] === track) paintImageCover(img);
+      };
+      img.onerror = ()=>{ /* keep procedural placeholder */ };
+      img.src = track.artUrl;
+    } else {
+      drawProceduralArt(track);
+    }
+  }
+
+  /* ---------- real embedded cover art: ID3v2 (mp3), FLAC, MP4/M4A ---------- */
+  function findBytes(bytes, pattern, from, upto){
+    const end = Math.min(bytes.length - pattern.length, upto);
+    for(let i=from; i<=end; i++){
+      let match = true;
+      for(let j=0;j<pattern.length;j++){
+        if(bytes[i+j] !== pattern[j]){ match=false; break; }
+      }
+      if(match) return i;
+    }
+    return -1;
+  }
+
+  function decodeID3Text(bytes, encoding){
+    try{
+      if(encoding===0) return new TextDecoder('latin1').decode(bytes).replace(/\0+$/,'').trim();
+      if(encoding===3) return new TextDecoder('utf-8').decode(bytes).replace(/\0+$/,'').trim();
+      if(encoding===1){ // UTF-16 with BOM
+        if(bytes.length>=2 && bytes[0]===0xFF && bytes[1]===0xFE) return new TextDecoder('utf-16le').decode(bytes.slice(2)).replace(/\0+$/,'').trim();
+        if(bytes.length>=2 && bytes[0]===0xFE && bytes[1]===0xFF) return new TextDecoder('utf-16be').decode(bytes.slice(2)).replace(/\0+$/,'').trim();
+        return new TextDecoder('utf-16le').decode(bytes).replace(/\0+$/,'').trim();
+      }
+      return new TextDecoder('utf-16be').decode(bytes).replace(/\0+$/,'').trim(); // encoding 2
+    } catch(e){ return new TextDecoder('latin1').decode(bytes).replace(/\0+$/,'').trim(); }
+  }
+
+  // Parses an ID3v2 (MP3) tag once, returning both the embedded cover art (APIC)
+  // and text tags (title/artist/bpm/key) — including a TXXX fallback scan for
+  // the non-standard "initial key"/"bpm" fields some DJ software writes.
+  function parseID3(view, bytes){
+    const majorVersion = bytes[3];
+    const size = ((bytes[6]&0x7f)<<21)|((bytes[7]&0x7f)<<14)|((bytes[8]&0x7f)<<7)|(bytes[9]&0x7f);
+    const tagEnd = Math.min(bytes.length, 10+size);
+    let offset = 10;
+    let art = null;
+    const tags = {};
+
+    while(offset+10 <= tagEnd){
+      const id = String.fromCharCode(bytes[offset],bytes[offset+1],bytes[offset+2],bytes[offset+3]);
+      if(id === '\0\0\0\0') break;
+      let frameSize;
+      if(majorVersion >= 4){
+        frameSize = ((bytes[offset+4]&0x7f)<<21)|((bytes[offset+5]&0x7f)<<14)|((bytes[offset+6]&0x7f)<<7)|(bytes[offset+7]&0x7f);
+      } else {
+        frameSize = view.getUint32(offset+4);
+      }
+      const frameStart = offset+10;
+      const frameEnd = frameStart+frameSize;
+      if(frameSize<=0 || frameEnd>tagEnd) break;
+
+      if(id === 'APIC' && !art){
+        let p = frameStart;
+        const encoding = bytes[p]; p+=1;
+        const mimeStart = p;
+        while(p<frameEnd && bytes[p]!==0) p++;
+        const mime = new TextDecoder('latin1').decode(bytes.slice(mimeStart,p));
+        p+=1;
+        p+=1; // picture type byte
+        if(encoding===1 || encoding===2){
+          while(p<frameEnd-1 && !(bytes[p]===0 && bytes[p+1]===0)) p+=2;
+          p+=2;
+        } else {
+          while(p<frameEnd && bytes[p]!==0) p++;
+          p+=1;
+        }
+        const data = bytes.slice(p, frameEnd);
+        if(data.length) art = { mime: mime||'image/jpeg', data };
+      } else if(id==='TIT2'){
+        tags.title = decodeID3Text(bytes.slice(frameStart+1, frameEnd), bytes[frameStart]);
+      } else if(id==='TPE1'){
+        tags.artist = decodeID3Text(bytes.slice(frameStart+1, frameEnd), bytes[frameStart]);
+      } else if(id==='TBPM'){
+        tags.bpm = decodeID3Text(bytes.slice(frameStart+1, frameEnd), bytes[frameStart]);
+      } else if(id==='TKEY'){
+        tags.key = decodeID3Text(bytes.slice(frameStart+1, frameEnd), bytes[frameStart]);
+      } else if(id==='TXXX'){
+        const encoding = bytes[frameStart];
+        let p = frameStart+1;
+        const descStart = p;
+        if(encoding===1 || encoding===2){ while(p<frameEnd-1 && !(bytes[p]===0 && bytes[p+1]===0)) p+=2; }
+        else { while(p<frameEnd && bytes[p]!==0) p++; }
+        const desc = decodeID3Text(bytes.slice(descStart,p), encoding).toLowerCase();
+        const valueStart = p + (encoding===1||encoding===2 ? 2 : 1);
+        const value = decodeID3Text(bytes.slice(valueStart, frameEnd), encoding);
+        if(value){
+          if(!tags.bpm && /bpm/.test(desc)) tags.bpm = value;
+          if(!tags.key && /(initial\s*key|^key$|musical\s*key|camelot)/.test(desc)) tags.key = value;
+        }
+      }
+      offset = frameEnd;
+    }
+    return { art, tags };
+  }
+
+  // Parses a FLAC file once, returning embedded art (PICTURE block) and tags
+  // (Vorbis comments — TITLE/ARTIST/BPM/KEY or INITIALKEY, non-standard but common).
+  function parseFlac(bytes){
+    let offset = 4;
+    let art = null;
+    const tags = {};
+    const utf8 = new TextDecoder('utf-8');
+
+    while(offset+4 <= bytes.length){
+      const header = bytes[offset];
+      const isLast = (header & 0x80) !== 0;
+      const blockType = header & 0x7f;
+      const blockLen = (bytes[offset+1]<<16)|(bytes[offset+2]<<8)|bytes[offset+3];
+      const blockStart = offset+4;
+
+      if(blockType===4){ // VORBIS_COMMENT — internal field lengths are little-endian
+        let p = blockStart;
+        const vendorLen = bytes[p]|(bytes[p+1]<<8)|(bytes[p+2]<<16)|(bytes[p+3]<<24); p += 4+vendorLen;
+        const count = bytes[p]|(bytes[p+1]<<8)|(bytes[p+2]<<16)|(bytes[p+3]<<24); p += 4;
+        for(let i=0;i<count && p+4<=bytes.length;i++){
+          const len = bytes[p]|(bytes[p+1]<<8)|(bytes[p+2]<<16)|(bytes[p+3]<<24); p += 4;
+          const comment = utf8.decode(bytes.slice(p, p+len)); p += len;
+          const eq = comment.indexOf('=');
+          if(eq>-1){
+            const key = comment.slice(0,eq).toUpperCase();
+            const value = comment.slice(eq+1).trim();
+            if(value){
+              if(key==='TITLE' && !tags.title) tags.title = value;
+              if(key==='ARTIST' && !tags.artist) tags.artist = value;
+              if(key==='BPM' && !tags.bpm) tags.bpm = value;
+              if((key==='KEY'||key==='INITIALKEY'||key==='INITIAL_KEY') && !tags.key) tags.key = value;
+            }
+          }
+        }
+      } else if(blockType===6 && !art){ // PICTURE
+        let p = blockStart+4;
+        const mimeLen = (bytes[p]<<24)|(bytes[p+1]<<16)|(bytes[p+2]<<8)|bytes[p+3]; p+=4;
+        const mime = new TextDecoder('latin1').decode(bytes.slice(p,p+mimeLen)); p+=mimeLen;
+        const descLen = (bytes[p]<<24)|(bytes[p+1]<<16)|(bytes[p+2]<<8)|bytes[p+3]; p+=4+descLen;
+        p += 16;
+        const dataLen = (bytes[p]<<24)|(bytes[p+1]<<16)|(bytes[p+2]<<8)|bytes[p+3]; p+=4;
+        const data = bytes.slice(p, p+dataLen);
+        if(data.length) art = { mime: mime||'image/jpeg', data };
+      }
+      offset = blockStart+blockLen;
+      if(isLast) break;
+    }
+    return { art, tags };
+  }
+
+  function readBoxes(view, start, end){
+    const boxes = [];
+    let offset = start;
+    while(offset+8 <= end){
+      let size = view.getUint32(offset);
+      const type = String.fromCharCode(view.getUint8(offset+4),view.getUint8(offset+5),view.getUint8(offset+6),view.getUint8(offset+7));
+      let headerSize = 8;
+      if(size===1 && offset+16<=end){
+        size = view.getUint32(offset+8)*4294967296 + view.getUint32(offset+12);
+        headerSize = 16;
+      } else if(size===0){
+        size = end-offset;
+      }
+      if(size<8) break;
+      boxes.push({ type, start: offset+headerSize, end: offset+size });
+      offset += size;
+    }
+    return boxes;
+  }
+
+  // Parses an MP4/M4A file once, returning cover art (covr) and the standard
+  // iTunes-style tags (©nam title, ©ART artist, tmpo bpm). There's no
+  // standardized "musical key" atom in the MP4 tagging spec, so key isn't
+  // read here — it falls back to procedural/'—' like any file without one.
+  function parseMp4(view, bytes){
+    const top = readBoxes(view, 0, bytes.length);
+    const moov = top.find(b=>b.type==='moov'); if(!moov) return { art:null, tags:{} };
+    const udta = readBoxes(view, moov.start, moov.end).find(b=>b.type==='udta'); if(!udta) return { art:null, tags:{} };
+    const meta = readBoxes(view, udta.start, udta.end).find(b=>b.type==='meta'); if(!meta) return { art:null, tags:{} };
+    const ilst = readBoxes(view, meta.start+4, meta.end).find(b=>b.type==='ilst'); if(!ilst) return { art:null, tags:{} };
+
+    const TITLE_TYPE = String.fromCharCode(0xA9)+'nam';
+    const ARTIST_TYPE = String.fromCharCode(0xA9)+'ART';
+    let art = null;
+    const tags = {};
+
+    readBoxes(view, ilst.start, ilst.end).forEach(box=>{
+      const dataBox = readBoxes(view, box.start, box.end).find(b=>b.type==='data');
+      if(!dataBox) return;
+      if(box.type==='covr' && !art){
+        const typeIndicator = view.getUint32(dataBox.start);
+        const data = bytes.slice(dataBox.start+8, dataBox.end);
+        if(data.length) art = { mime: typeIndicator===14 ? 'image/png' : 'image/jpeg', data };
+      } else if(box.type===TITLE_TYPE){
+        tags.title = new TextDecoder('utf-8').decode(bytes.slice(dataBox.start+8, dataBox.end)).trim();
+      } else if(box.type===ARTIST_TYPE){
+        tags.artist = new TextDecoder('utf-8').decode(bytes.slice(dataBox.start+8, dataBox.end)).trim();
+      } else if(box.type==='tmpo' && dataBox.end-dataBox.start>=10){
+        tags.bpm = String(view.getUint16(dataBox.start+8));
+      }
+    });
+
+    return { art, tags };
+  }
+
+  // Reads embedded cover art and text tags (title/artist/bpm/key) directly
+  // from the file's own bytes — no network calls, nothing fetched externally.
+  async function extractMetadata(file){
+    try{
+      const buf = await file.slice(0, Math.min(file.size, 24*1024*1024)).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const view = new DataView(buf);
+      if(bytes.length<12) return { art:null, tags:{} };
+
+      if(bytes[0]===0x49 && bytes[1]===0x44 && bytes[2]===0x33){ return parseID3(view, bytes); } // 'ID3'
+      if(bytes[0]===0x66 && bytes[1]===0x4C && bytes[2]===0x61 && bytes[3]===0x43){ return parseFlac(bytes); } // 'fLaC'
+      if(findBytes(bytes, [0x66,0x74,0x79,0x70], 0, 16) !== -1){ return parseMp4(view, bytes); } // 'ftyp' -> mp4/m4a
+    } catch(e){ /* unsupported/unreadable tags — falls back to filename + procedural art */ }
+    return { art:null, tags:{} };
+  }
+
+  /* ---------- real waveform: decode file -> peak buckets ---------- */
+  async function computeRealPeaks(file, numBuckets, need){
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await getDecodeCtx().decodeAudioData(arrayBuffer.slice(0));
+    const channels = audioBuffer.numberOfChannels;
+    const length = audioBuffer.length;
+    const bucketSize = Math.max(1, Math.floor(length / numBuckets));
+    const peaks = new Array(numBuckets).fill(0);
+    const maxSamplesPerBucket = 400; // cap work per bucket for very long files
+
+    for(let c=0;c<channels;c++){
+      const data = audioBuffer.getChannelData(c);
+      for(let i=0;i<numBuckets;i++){
+        const start = i*bucketSize;
+        const end = Math.min(length, start+bucketSize);
+        const stride = Math.max(1, Math.floor((end-start)/maxSamplesPerBucket));
+        let max = 0;
+        for(let j=start;j<end;j+=stride){
+          const v = Math.abs(data[j]);
+          if(v>max) max = v;
+        }
+        if(max > peaks[i]) peaks[i] = max;
+      }
+    }
+    const overallMax = Math.max(...peaks, 0.0001);
+    const normalized = peaks.map(p => Math.max(0.05, Math.pow(p/overallMax, 0.65)));
+    const out = { peaks: normalized, duration: audioBuffer.duration };
+    if(need && (need.bpm || need.key)){                       // only analyse what the tags didn't provide
+      const { x, sr } = monoDown(audioBuffer, 11025);
+      if(need.bpm){ try{ const r = detectBpm(x, sr); if(r){ out.bpm = r.bpm; out.bpmConf = r.conf; } }catch(e){} }
+      if(need.key){ try{ out.key = detectKey(x, sr); }catch(e){} }
+    }
+    return out;
+  }
+
+  /* ---------- key naming (tags may say "Am", "F# minor", "8A", "1m"...) ---------- */
+  const PITCHES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+  const CAM = [8,3,10,5,12,7,2,9,4,11,6,1];   // Camelot number of the major key on each pitch class
+  const KS_MAJ = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+  const KS_MIN = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+
+  function camNum(p){ return CAM[p.minor ? (p.pc+3)%12 : p.pc]; }
+
+  function normKey(str){
+    const s = String(str || '').trim();
+    let m = s.match(/^(\d{1,2})\s*([ABab])$/);                 // Camelot
+    if(m){ const pc = CAM.indexOf(+m[1]); if(pc < 0) return null; const minor = m[2].toUpperCase()==='A'; return { pc: minor ? (pc+9)%12 : pc, minor }; }
+    m = s.match(/^(\d{1,2})\s*([mdMD])$/);                     // Open Key
+    if(m){ const n = +m[1]; if(n < 1 || n > 12) return null; const pc = ((n-1)*7)%12, minor = m[2].toLowerCase()==='m'; return { pc: minor ? (pc+9)%12 : pc, minor }; }
+    m = s.match(/^([A-Ga-g])([#b♯♭]?)\s*(.*)$/);
+    if(!m) return null;
+    let pc = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[m[1].toUpperCase()];
+    if(m[2] === '#' || m[2] === '♯') pc++; else if(m[2]) pc--;
+    return { pc: (pc+12)%12, minor: /^m(?!aj)/.test(m[3]) || /^min/i.test(m[3]) };
+  }
+
+  function fmtKey(k){
+    const p = normKey(k);
+    return p ? `${PITCHES[p.pc]}${p.minor ? 'm' : ''} · ${camNum(p)}${p.minor ? 'A' : 'B'}` : (k && k !== '—' ? k : '—');
+  }
+
+  /* ---------- BPM + key detection from the decoded audio ---------- */
+  function monoDown(buf, target){
+    const f = Math.max(1, Math.round(buf.sampleRate / target)), n = Math.floor(buf.length / f);
+    const out = new Float32Array(n);
+    for(let c=0;c<buf.numberOfChannels;c++){
+      const d = buf.getChannelData(c);
+      for(let i=0;i<n;i++){ let sum = 0; for(let j=0;j<f;j++) sum += d[i*f+j]; out[i] += sum / f; }
+    }
+    return { x: out, sr: buf.sampleRate / f };
+  }
+
+  // Two onset curves (raw energy catches bass kicks, first-difference catches hats/snares),
+  // autocorrelated at every candidate tempo 70-180. conf = how much the winner stands out (0-1).
+  function detectBpm(x, sr){
+    const hop = 128, n = Math.floor(x.length / hop), fps = sr / hop;
+    if(n < fps * 8) return null;
+    const on = new Float32Array(n);
+    for(const diff of [false, true]){
+      const c = new Float32Array(n), eh = new Float32Array(n); let prev = 0, sum = 0;
+      for(let i=0;i<n;i++){
+        let e2 = 0;
+        for(let j=0;j<hop;j++){ const k = i*hop+j, v = diff ? x[k] - (k ? x[k-1] : 0) : x[k]; e2 += v*v; }
+        eh[i] = e2;
+      }
+      for(let i=0;i<n;i++){
+        let w = 0; for(let q=Math.max(0,i-3);q<=i;q++) w += eh[q];
+        const e = Math.sqrt(w / (4*hop));
+        c[i] = Math.max(0, e - prev); prev = e; sum += c[i];
+      }
+      const norm = sum / n || 1;
+      for(let i=0;i<n;i++) on[i] += c[i] / norm;
+    }
+    const sm = new Float32Array(n);
+    for(let i=2;i<n-2;i++) sm[i] = (on[i-2] + 2*on[i-1] + 3*on[i] + 2*on[i+1] + on[i+2]) / 9;
+    let mean = 0; for(let i=0;i<n;i++) mean += sm[i]; mean /= n;
+    for(let i=0;i<n;i++) on[i] = sm[i] - mean;
+    const ac = lag => { const l = Math.floor(lag), fr = lag - l; let t = 0; for(let i=0;i+l+1<n;i++) t += on[i] * (on[i+l]*(1-fr) + on[i+l+1]*fr); return t / (n - l); };
+    let best = 0, bestScore = -Infinity, abs = 0, cnt = 0;
+    for(let bpm=70; bpm<=180; bpm+=0.5){
+      const lag = fps * 60 / bpm;
+      const score = (ac(lag) + 0.5 * ac(lag*2)) * Math.exp(-0.5 * Math.pow(Math.log2(bpm/120), 2));
+      abs += Math.abs(score); cnt++;
+      if(score > bestScore){ bestScore = score; best = bpm; }
+    }
+    const conf = Math.max(0, Math.min(1, (bestScore / ((abs / cnt) || 1) - 2) / 6));
+    return { bpm: Math.round(best), conf };
+  }
+
+  // Chromagram (Goertzel on C3-B6, 40 windows across the middle 80%) -> Krumhansl-Schmuckler profiles.
+  function detectKey(x, sr){
+    const N = 4096, FRAMES = 40;
+    if(x.length < N * 4) return null;
+    const win = new Float32Array(N); for(let i=0;i<N;i++) win[i] = 0.5 - 0.5*Math.cos(2*Math.PI*i/(N-1));
+    const coef = []; for(let m=48;m<96;m++) coef.push(2 * Math.cos(2*Math.PI * 440*Math.pow(2,(m-69)/12) / sr));
+    const chroma = new Float64Array(12), start0 = x.length*0.1, span = x.length*0.8 - N;
+    for(let f=0;f<FRAMES;f++){
+      const off = Math.floor(start0 + span * f / (FRAMES-1));
+      const fc = new Float64Array(12); let tot = 0;
+      for(let k=0;k<coef.length;k++){
+        const c = coef[k]; let s1 = 0, s2 = 0;
+        for(let i=0;i<N;i++){ const v = x[off+i]*win[i] + c*s1 - s2; s2 = s1; s1 = v; }
+        const mag = Math.sqrt(Math.max(0, s1*s1 + s2*s2 - c*s1*s2));
+        fc[(48+k)%12] += mag; tot += mag;
+      }
+      if(tot > 0) for(let p=0;p<12;p++) chroma[p] += fc[p] / tot;
+    }
+    const pearson = (a, b) => {
+      let ma = 0, mb = 0; for(let i=0;i<12;i++){ ma += a[i]; mb += b[i]; } ma /= 12; mb /= 12;
+      let nu = 0, da = 0, db = 0; for(let i=0;i<12;i++){ nu += (a[i]-ma)*(b[i]-mb); da += (a[i]-ma)**2; db += (b[i]-mb)**2; }
+      return nu / (Math.sqrt(da*db) || 1);
+    };
+    let best = { s:-2, pc:0, minor:false };
+    for(let t=0;t<12;t++){
+      const rot = Array.from({ length:12 }, (_, i)=>chroma[(t+i)%12]);
+      const M = pearson(rot, KS_MAJ), m = pearson(rot, KS_MIN);
+      if(M > best.s) best = { s:M, pc:t, minor:false };
+      if(m > best.s) best = { s:m, pc:t, minor:true };
+    }
+    return PITCHES[best.pc] + (best.minor ? 'm' : '');
+  }
+
+  // One decode per track: waveform + (if tags are missing) BPM and key. "~" marks detected values.
+  function analyzeTrack(track){
+    if(track._job) return track._job;
+    const need = { bpm: !track.bpm || track.bpm === '—', key: !track.key || track.key === '—' };
+    track._job = computeRealPeaks(track.file, 64, need).then(r=>{
+      track.peaks = r.peaks;
+      if(!track.duration) track.duration = r.duration;
+      if(need.bpm && r.bpm){ track.bpm = String(r.bpm); track.bpmGuess = true; track.bpmLow = r.bpmConf < LOWCONF; }
+      if(need.key && r.key){ track.key = r.key; track.keyGuess = true; }
+      saveMeta(track);
+      refreshTrack(track);
+    }).catch(()=>{});
+    return track._job;
+  }
+
+  function refreshTrack(t){
+    if(!LIBRARY.includes(t)) return;
+    if(sortMode !== 'title') resort(); else fillRow(t, LIBRARY.indexOf(t));
+    if(LIBRARY[currentIndex] === t){
+      showMeta(t);
+      durTimeEl.textContent = formatTime(t.duration);
+      drawWave(t.peaks, audioEl.currentTime / (audioEl.duration || t.duration || 1));
+    }
+    updateListActive();
+  }
+
+  let analyzing = false;
+  async function analyzeAll(){        // background pass so every row gets its BPM and key
+    if(analyzing) return; analyzing = true;
+    try{
+      let t;
+      while((t = LIBRARY.find(x=>!x._job))){ await analyzeTrack(t); await new Promise(r=>setTimeout(r, 40)); }
+    } finally { analyzing = false; }
+  }
+
+  const LOWCONF = 0.1;   // below this the winner barely stands out from noise -> shown with "?"
+  let metaTimer = null, metaPending = false;
+  function saveMeta(t){
+    if(!currentVault || !t._fk) return;
+    (currentVault.meta = currentVault.meta || {})[t._fk] = { bpm:t.bpm, key:t.key, bpmGuess:!!t.bpmGuess, keyGuess:!!t.keyGuess, bpmLow:!!t.bpmLow, bpmManual:!!t.bpmManual, keyManual:!!t.keyManual, cues:t.cues || null, loop:t.loop || null, grid:t.grid == null ? null : t.grid };
+    metaPending = true; clearTimeout(metaTimer);
+    metaTimer = setTimeout(async ()=>{
+      metaPending = false; let ok = false;
+      try{ ok = await saveVaults(); }catch(e){}
+      if(!ok) toast("couldn't save your cues and edits: browser storage is full or blocked.");
+    }, 800);
+  }
+
+  document.addEventListener('visibilitychange', ()=>{     // leaving the tab or app: save pending edits now, not in 0.8s
+    if(document.visibilityState === 'hidden' && metaPending){ clearTimeout(metaTimer); metaPending = false; saveVaults(); }
+  });
+
+  /* ---------- tempo (±8%) with key lock ---------- */
+  let tempoRate = 1, keyLock = true;
+  function applyTempo(){
+    audioEl.defaultPlaybackRate = tempoRate;     // survives the src change when the next song loads
+    audioEl.playbackRate = tempoRate;
+    audioEl.preservesPitch = audioEl.mozPreservesPitch = audioEl.webkitPreservesPitch = keyLock;
+    document.getElementById('tempoVal').textContent = (tempoRate >= 1 ? '+' : '') + ((tempoRate-1)*100).toFixed(1) + '%';
+    document.getElementById('keyLock').classList.toggle('on', keyLock);
+    if(currentIndex >= 0){ showMeta(LIBRARY[currentIndex]); updateListActive(); }
+  }
+  document.getElementById('tempo').addEventListener('input', (e)=>{ tempoRate = 1 + parseFloat(e.target.value)/100; applyTempo(); });
+  document.getElementById('keyLock').addEventListener('click', ()=>{ keyLock = !keyLock; applyTempo(); });
+  document.getElementById('tempoVal').addEventListener('click', ()=>{ document.getElementById('tempo').value = 0; tempoRate = 1; applyTempo(); });
+
+  /* ---------- next compatible song: ranked, and it prefers songs you haven't played yet ---------- */
+  document.getElementById('nextMatch').addEventListener('click', ()=>{
+    const cur = LIBRARY[currentIndex]; if(!cur) return;
+    const cp = normKey(cur.key), cb = parseFloat(cur.bpm) * tempoRate;
+    const ranked = LIBRARY.filter(t => t !== cur && compatible(cp, cb, t)).map(t=>{
+      const p = normKey(t.key), bp = parseFloat(t.bpm);
+      const keyCost = (camNum(p) === camNum(cp) && p.minor === cp.minor) ? 0 : 1;      // same key beats a neighbour
+      return { t, cost: keyCost * 10 + Math.abs(bp - cb) / cb * 100 + (playedKeys.has(t._fk) ? 100 : 0) };
+    }).sort((x, y) => x.cost - y.cost);
+    if(ranked.length){ const i = LIBRARY.indexOf(ranked[0].t); goTo(i, i > currentIndex ? 'right' : 'left'); return; }
+    const btn = document.getElementById('nextMatch'); btn.textContent = 'NONE'; setTimeout(()=>{ btn.textContent = 'MIX'; }, 1200);
+  });
+
+  /* ---------- back up + restore a vault (name, order, BPM/key fixes; your audio stays where it already is) ---------- */
+  function downloadBlob(blob, name){
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  }
+  document.getElementById('backupBtn').addEventListener('click', ()=>{
+    if(!currentVault) return;
+    const data = {
+      app: 'looseleaf', version: 1, exported: new Date().toISOString(),
+      vault: {
+        name: currentVault.name,
+        order: currentVault.order || [],
+        meta: currentVault.meta || {},
+        songs: LIBRARY.map(t => ({ fk: t._fk, file: t.file.name, title: t.title, artist: t.artist }))
+      }
+    };
+    try{ localStorage.setItem('looseleaf.bk.' + currentVault.id, String(Date.now())); }catch(e){}
+    downloadBlob(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }),
+      (currentVault.name.replace(/[^\w\- ]+/g, '') || 'vault') + '.looseleaf.json');
+  });
+
+  const restoreBtn = document.getElementById('restoreBtn'), restoreInput = document.getElementById('restoreInput');
+  restoreBtn.addEventListener('click', ()=>restoreInput.click());
+  restoreInput.addEventListener('change', async e=>{
+    const f = e.target.files[0]; restoreInput.value = ''; if(!f) return;
+    const note = document.getElementById('dirNote');
+    try{
+      if(f.size > 5e6) throw new Error('too big');
+      const d = JSON.parse(await f.text());
+      if(!d || d.app !== 'looseleaf' || !d.vault || typeof d.vault !== 'object') throw new Error('not ours');
+      const sv = d.vault, str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+      const meta = {};
+      Object.entries(sv.meta && typeof sv.meta === 'object' ? sv.meta : {}).slice(0, 5000).forEach(([k, m])=>{
+        if(k === '__proto__' || !m || typeof m !== 'object') return;
+        meta[k.slice(0, 300)] = { bpm: str(m.bpm, 12) || '—', key: str(m.key, 12) || '—', bpmGuess: !!m.bpmGuess, keyGuess: !!m.keyGuess, bpmLow: !!m.bpmLow, bpmManual: !!m.bpmManual, keyManual: !!m.keyManual, cues: djCues(m.cues), loop: djLoop(m.loop), grid: djNum(m.grid) };
+      });
+      const order = Array.isArray(sv.order) ? sv.order.filter(x => typeof x === 'string').slice(0, 5000).map(x => x.slice(0, 300)) : [];
+      const vault = newVault(str(sv.name, 30) || 'restored vault', { meta, order });
+      vaults.push(vault);
+      const ok = await saveVaults();
+      renderVaultList();
+      const n = Array.isArray(sv.songs) ? sv.songs.length : Object.keys(meta).length;
+      note.textContent = ok
+        ? `restored "${vault.name}". open it and add its ${n} song file${n === 1 ? '' : 's'} again: your order and BPM/key fixes snap back on.`
+        : `restored "${vault.name}", but this browser wouldn't save it.`;
+    } catch(err){
+      note.textContent = "that file isn't a looseleaf backup.";
+    }
+  });
+
+  /* ---------- drag a row by its ≡ handle (mine mode) ---------- */
+  let justDragged = false;
+  function startRowDrag(t, e){
+    if(sortMode !== 'mine' || (e.button != null && e.button > 0)) return;
+    e.preventDefault(); e.stopPropagation();
+    const handle = e.target.closest('.gr'), row = t._row;
+    try{ handle.setPointerCapture(e.pointerId); }catch(_){}
+    const rows = () => LIBRARY.filter(x => x._row && !x._row.hidden && x !== t);
+    const startY = e.clientY, startScroll = listEl.scrollTop;
+    let lastY = e.clientY, target = null, raf = 0, done = false;
+    row.classList.add('dragRow');
+    const clearMarks = () => LIBRARY.forEach(x => x._row && x._row.classList.remove('dropBefore', 'dropAfter'));
+    function frame(){
+      if(done) return;
+      const lr = listEl.getBoundingClientRect();
+      if(lastY < lr.top + 28) listEl.scrollTop -= 8; else if(lastY > lr.bottom - 28) listEl.scrollTop += 8;   // edge auto-scroll
+      row.style.transform = `translateY(${lastY - startY + (listEl.scrollTop - startScroll)}px)`;
+      const others = rows();
+      let hit = null;
+      for(const x of others){ const r = x._row.getBoundingClientRect(); if(lastY >= r.top && lastY < r.bottom){ hit = x; break; } }
+      if(!hit && others.length){
+        const first = others[0]._row.getBoundingClientRect(), last = others[others.length-1]._row.getBoundingClientRect();
+        hit = lastY < first.top ? others[0] : lastY >= last.bottom ? others[others.length-1] : target;
+      }
+      if(hit !== target){
+        clearMarks(); target = hit;
+        if(target) target._row.classList.add(LIBRARY.indexOf(target) < LIBRARY.indexOf(t) ? 'dropBefore' : 'dropAfter');
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    const onMove = ev => { lastY = ev.clientY; };
+    function finish(commit){
+      if(done) return; done = true;
+      cancelAnimationFrame(raf);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onCancel);
+      handle.removeEventListener('lostpointercapture', onCancel);
+      row.classList.remove('dragRow'); row.style.transform = ''; clearMarks();
+      justDragged = true; setTimeout(()=>{ justDragged = false; }, 0);
+      if(commit && target && target !== t){
+        const cur = LIBRARY[currentIndex];
+        const i = LIBRARY.indexOf(t), j = LIBRARY.indexOf(target);
+        LIBRARY.splice(i, 1); LIBRARY.splice(j, 0, t);
+        if(currentVault){ currentVault.order = LIBRARY.map(x => x._fk); saveVaults(); }
+        currentIndex = LIBRARY.indexOf(cur);
+        renderList(); refreshChrome();
+        if(t._row) t._row.scrollIntoView({ block:'nearest' });
+      }
+    }
+    const onUp = () => finish(true), onCancel = () => finish(false);
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onCancel);
+    handle.addEventListener('lostpointercapture', onCancel);
+    raf = requestAnimationFrame(frame);
+  }
+
+  /* ---------- reorder + remove songs ---------- */
+  let rmArm = null;
+  function rowAction(t, cls){
+    const i = LIBRARY.indexOf(t);
+    if(cls === 'up' || cls === 'dn'){
+      const j = cls === 'up' ? i-1 : i+1; if(j < 0 || j >= LIBRARY.length) return;
+      const cur = LIBRARY[currentIndex];
+      [LIBRARY[i], LIBRARY[j]] = [LIBRARY[j], LIBRARY[i]];
+      if(currentVault){ currentVault.order = LIBRARY.map(x=>x._fk); saveVaults(); }
+      currentIndex = LIBRARY.indexOf(cur);
+      renderList(); refreshChrome();
+      return;
+    }
+    const icon = t._row.querySelector('.rm');                   // remove needs two taps
+    if(rmArm !== t){ rmArm = t; icon.textContent = 'sure?'; setTimeout(()=>{ if(rmArm === t){ rmArm = null; icon.textContent = '×'; } }, 2000); return; }
+    rmArm = null; removeTrack(t);
+  }
+
+  function removeTrack(t){
+    const i = LIBRARY.indexOf(t), before = LIBRARY[currentIndex], wasCur = t === before;
+    LIBRARY.splice(i, 1); revokeTrackUrls(t);
+    if(currentVault){
+      const v = currentVault;
+      if(kindOf(v) === 'link'){ (v.hidden = v.hidden || []).push(t._fk); v.count = LIBRARY.length; }   // your folder is never touched
+      else if(v.songs){ const rec = v.songs.find(r => fkOf(r) === t._fk); v.songs = v.songs.filter(r => r !== rec); if(rec) opfsDropSong(v, rec.key); }
+      else if(v.files){ v.files = v.files.filter(f => fkOf(f) !== t._fk); }
+      if(currentVault.meta) delete currentVault.meta[t._fk];
+      if(currentVault.order) currentVault.order = currentVault.order.filter(k => k !== t._fk);
+      saveVaults();
+    }
+    if(!LIBRARY.length){ if(currentVault) openVault(currentVault); return; }
+    const keep = wasCur ? LIBRARY[Math.min(i, LIBRARY.length-1)] : before;
+    rebuildLettersAndSort();
+    currentIndex = LIBRARY.indexOf(keep);
+    if(wasCur) render(); else refreshChrome();
+  }
+
+  /* ---------- vault menu: rename, export, delete ---------- */
+  const menuBtn = document.getElementById('menuBtn'), vaultMenu = document.getElementById('vaultMenu');
+  menuBtn.addEventListener('click', async ()=>{
+    const open = !vaultMenu.classList.toggle('hidden');
+    if(!open || !currentVault) return;
+    const v = currentVault, link = kindOf(v) === 'link';
+    document.getElementById('renameInput').value = v.name;
+    document.getElementById('relinkBtn').classList.toggle('hidden', !link);
+    const unhide = document.getElementById('unhideBtn'), nh = (v.hidden || []).length;
+    unhide.classList.toggle('hidden', !(link && nh));
+    unhide.textContent = `show ${nh} removed`;
+    const info = document.getElementById('storageInfo');
+    info.textContent = '';
+    let line = link ? 'linked to a folder on this device.\nnothing is copied.' : await storageLine();
+    if(!link){
+      let last = null; try{ last = parseInt(localStorage.getItem('looseleaf.bk.' + v.id), 10); }catch(e){}
+      line += '\nlast backup: ' + (last ? ago(last) : 'never');
+    }
+    if(currentVault === v) info.textContent = line;
+  });
+  document.getElementById('relinkBtn').addEventListener('click', ()=>{ vaultMenu.classList.add('hidden'); linkFolder(); });
+  document.getElementById('unhideBtn').addEventListener('click', async ()=>{
+    if(!currentVault) return;
+    currentVault.hidden = []; vaultMenu.classList.add('hidden'); await saveVaults(); openVault(currentVault);
+  });
+  document.getElementById('renameBtn').addEventListener('click', async ()=>{
+    const v = document.getElementById('renameInput').value.trim();
+    if(!currentVault || !v) return;
+    currentVault.name = v; setLibraryLabel(v); vaultMenu.classList.add('hidden'); await saveVaults();
+  });
+  let delArmed = false;
+  document.getElementById('deleteBtn').addEventListener('click', async (e)=>{
+    const b = e.currentTarget;
+    if(!delArmed){ delArmed = true; b.textContent = 'sure? tap again'; setTimeout(()=>{ delArmed = false; b.textContent = 'delete vault'; }, 2500); return; }
+    delArmed = false; b.textContent = 'delete vault';
+    const gone = currentVault; vaults = vaults.filter(v => v !== gone); await saveVaults(); if(kindOf(gone) !== 'link') opfsDropVault(gone); showDirectory();
+  });
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    if(!currentVault) return;
+    const q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+    const rows = ['title,artist,bpm,key,camelot,file'].concat(LIBRARY.map(t=>{
+      const p = normKey(t.key);
+      return [t.title, t.artist, t.bpm, p ? PITCHES[p.pc] + (p.minor ? 'm' : '') : t.key, p ? camNum(p) + (p.minor ? 'A' : 'B') : '', t.file.name].map(q).join(',');
+    }));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type:'text/csv' }));
+    a.download = (currentVault.name.replace(/[^\w\- ]+/g, '') || 'vault') + '.csv'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  });
+
+  /* ---------- manual BPM: tap tempo, and tap a chip to type a value ---------- */
+  let taps = [];
+  document.getElementById('tapBtn').addEventListener('click', ()=>{
+    const t = LIBRARY[currentIndex], now = performance.now(); if(!t) return;
+    if(taps.length && now - taps[taps.length-1] > 2000) taps = [];
+    taps = [...taps, now].slice(-9);
+    if(taps.length < 3) return;
+    const bpm = 60000 / ((taps[taps.length-1] - taps[0]) / (taps.length-1)) / tempoRate;   // undo tempo change: tap = heard speed
+    t.bpm = String(Math.round(bpm*10)/10); t.bpmGuess = t.bpmLow = false; t.bpmManual = true;
+    showMeta(t); fillRow(t, LIBRARY.indexOf(t)); updateListActive(); saveMeta(t);
+  });
+
+  function editChip(field){
+    const t = LIBRARY[currentIndex]; if(!t) return;
+    const el = document.getElementById(field === 'bpm' ? 'metaBpm' : 'metaKey');
+    if(el.querySelector('input')) return;
+    const inp = document.createElement('input');
+    inp.className = 'chipEdit';
+    inp.value = field === 'bpm' ? (parseFloat(t.bpm) || '') : (normKey(t.key) ? fmtKey(t.key).split(' · ')[0] : '');
+    el.textContent = ''; el.appendChild(inp); inp.focus(); inp.select();
+    let done = false;
+    const finish = save => {
+      if(done) return; done = true;
+      const v = inp.value.trim();
+      if(save && field === 'bpm' && parseFloat(v) > 0){ t.bpm = String(Math.round(parseFloat(v)*10)/10); t.bpmGuess = t.bpmLow = false; t.bpmManual = true; }
+      if(save && field === 'key' && normKey(v)){ t.key = v; t.keyGuess = false; t.keyManual = true; }
+      saveMeta(t); refreshTrack(t); showMeta(t);
+    };
+    inp.addEventListener('keydown', e=>{ if(e.key === 'Enter') finish(true); if(e.key === 'Escape') finish(false); });
+    inp.addEventListener('blur', ()=>finish(true));
+  }
+  document.getElementById('metaKey').parentElement.addEventListener('click', ()=>editChip('key'));
+  document.getElementById('metaBpm').parentElement.addEventListener('click', ()=>editChip('bpm'));
+
+  /* ---------- waveform drawing ---------- */
+  const waveCanvas = document.getElementById('wave');
+  const wctx = waveCanvas.getContext('2d');
+
+  function resizeWaveCanvas(){
+    const rect = waveCanvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    waveCanvas.width = rect.width * dpr;
+    waveCanvas.height = rect.height * dpr;
+    waveCanvas.style.width = rect.width + 'px';
+    waveCanvas.style.height = rect.height + 'px';
+    wctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function drawWave(peaks, progress){
+    if(!peaks || !peaks.length) { wctx.clearRect(0,0,waveCanvas.clientWidth,waveCanvas.clientHeight); return; }
+    const w = waveCanvas.clientWidth;
+    const h = waveCanvas.clientHeight;
+    wctx.clearRect(0,0,w,h);
+    const n = peaks.length;
+    const gap = 2.5;
+    const barW = (w - gap*(n-1)) / n;
+    const midY = h/2;
+    const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+
+    for(let i=0;i<n;i++){
+      const amp = peaks[i];
+      const barH = Math.max(2, amp*h*0.86);
+      const x = i*(barW+gap);
+      const played = i/n <= progress;
+      wctx.fillStyle = played ? accentColor : 'rgba(17,17,16,0.28)';
+      const r = 0;
+      roundRect(wctx, x, midY-barH/2, barW, barH, r);
+      wctx.fill();
+    }
+    const cur = LIBRARY[currentIndex]; if(cur) djMarks(w, h, cur);
+  }
+
+  /* ---------- cue points, loops, beat grid ---------- */
+  let loopOn = false, gridOn = false;
+  const loopBtnEl = document.getElementById('loopBtn'), gridBtnEl = document.getElementById('gridBtn');
+  const djTrack = () => LIBRARY[currentIndex];
+  const djBeat = t => { const b = parseFloat(t.bpm); return isFinite(b) && b > 0 ? 60 / b : 0; };   // seconds per beat, in song time
+  const djSnap = (t, x) => { const bl = djBeat(t); return (t.grid != null && bl) ? Math.max(0, t.grid + Math.round((x - t.grid) / bl) * bl) : x; };
+  const djNum = v => typeof v === 'number' && isFinite(v) && v >= 0 && v < 86400 ? v : null;
+  const djCues = v => Array.isArray(v) ? [0, 1, 2, 3].map(i => djNum(v[i])) : null;
+  const djLoop = v => v && djNum(v.a) != null ? { a: djNum(v.a), b: djNum(v.b), beats: [1, 2, 4, 8].includes(v.beats) ? v.beats : undefined } : null;
+
+  function djRedraw(){
+    const t = djTrack();
+    if(t && t.peaks){ const d = audioEl.duration || t.duration; drawWave(t.peaks, d ? audioEl.currentTime / d : 0); }
+  }
+  function djSync(){
+    const t = djTrack() || {}, cues = t.cues || [], lp = t.loop || {};
+    const ready = lp.a != null && lp.b > lp.a;
+    document.querySelectorAll('#cueRow .pad').forEach((b, i)=>{
+      b.classList.toggle('set', cues[i] != null);
+      b.title = cues[i] != null ? `Jump to ${formatTime(cues[i])} (hold or shift-click to clear)` : 'Set a cue here';
+      b.setAttribute('aria-label', cues[i] != null ? `Cue ${i + 1}: jump to ${formatTime(cues[i])}` : `Cue ${i + 1}: set here`);
+    });
+    document.getElementById('loopIn').classList.toggle('on', lp.a != null);
+    document.getElementById('loopOut').classList.toggle('on', ready);
+    loopBtnEl.classList.toggle('on', loopOn && ready); loopBtnEl.setAttribute('aria-pressed', String(loopOn && ready));
+    document.querySelectorAll('#loopRow .bl').forEach(b => b.classList.toggle('on', loopOn && ready && +b.dataset.b === lp.beats));
+    gridBtnEl.classList.toggle('on', gridOn); gridBtnEl.setAttribute('aria-pressed', String(gridOn));
+    djRedraw();
+  }
+  function djSave(t){ saveMeta(t); djSync(); }
+
+  // cue pads: empty pad stores the playhead, a set pad jumps there (and plays). Hold or shift-click clears.
+  function cuePad(i){
+    const t = djTrack(); if(!t) return;
+    t.cues = t.cues || [null, null, null, null];
+    if(t.cues[i] == null){ t.cues[i] = audioEl.currentTime; djSave(t); return; }
+    audioEl.currentTime = t.cues[i];
+    if(audioEl.paused) audioEl.play().catch(()=>{});
+    djSync();
+  }
+  function clearCue(i){ const t = djTrack(); if(t && t.cues){ t.cues[i] = null; djSave(t); } }
+  document.querySelectorAll('#cueRow .pad').forEach(b=>{
+    const i = +b.dataset.c; let timer = null, held = false;
+    b.addEventListener('pointerdown', ()=>{ held = false; timer = setTimeout(()=>{ held = true; clearCue(i); }, 600); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, ()=>clearTimeout(timer)));
+    b.addEventListener('click', (e)=>{ if(held){ held = false; return; } if(e.shiftKey){ clearCue(i); return; } cuePad(i); });
+  });
+
+  // loops: in / out by hand, or a 1-8 beat loop from here (snapped to the beat grid once you've set beat 1)
+  document.getElementById('loopIn').addEventListener('click', ()=>{
+    const t = djTrack(); if(!t) return;
+    t.loop = { a: audioEl.currentTime, b: null }; loopOn = false; djSave(t);
+  });
+  document.getElementById('loopOut').addEventListener('click', ()=>{
+    const t = djTrack(); if(!t || !t.loop || t.loop.a == null || audioEl.currentTime < t.loop.a + 0.05) return;
+    t.loop.b = audioEl.currentTime; delete t.loop.beats; loopOn = true; djSave(t);
+  });
+  loopBtnEl.addEventListener('click', ()=>{
+    const t = djTrack(); if(!t || !t.loop || !(t.loop.b > t.loop.a)) return;
+    loopOn = !loopOn; djSync();
+  });
+  document.querySelectorAll('#loopRow .bl').forEach(b => b.addEventListener('click', ()=>{
+    const t = djTrack(), n = +b.dataset.b; if(!t) return;
+    if(loopOn && t.loop && t.loop.beats === n){ loopOn = false; djSync(); return; }   // tap the lit one to leave the loop
+    const bl = djBeat(t);
+    if(!bl){ b.textContent = '?'; setTimeout(()=>{ b.textContent = n; }, 900); return; }   // needs a BPM first
+    const a = djSnap(t, audioEl.currentTime), d = audioEl.duration || t.duration || Infinity;
+    t.loop = { a, b: Math.min(a + n * bl, d), beats: n }; loopOn = true; djSave(t);
+  }));
+  (function loopTick(){                                    // checked every frame: timeupdate is far too slow for a tight loop
+    const t = djTrack();
+    if(loopOn && t && t.loop && t.loop.b > t.loop.a && !audioEl.paused){
+      const c = audioEl.currentTime;
+      if(c >= t.loop.b - 0.015 && c < t.loop.b + 0.5) audioEl.currentTime = t.loop.a;
+    }
+    requestAnimationFrame(loopTick);
+  })();
+
+  // beat grid: uses the song's BPM; "set 1" tells it where beat 1 is
+  gridBtnEl.addEventListener('click', ()=>{ gridOn = !gridOn; djSync(); });
+  document.getElementById('gridSet').addEventListener('click', ()=>{
+    const t = djTrack(); if(!t) return;
+    t.grid = audioEl.currentTime; gridOn = true; djSave(t);
+  });
+
+  function djMarks(w, h, t){
+    const dur = audioEl.duration || t.duration; if(!dur) return;
+    const X = s => s / dur * w;
+    const bl = djBeat(t);
+    if(gridOn && bl && X(bl * 4) >= 4){                    // too dense to read? draw nothing rather than mush
+      const g = t.grid != null ? t.grid : 0, beats = X(bl) >= 4;
+      wctx.lineWidth = 1;
+      for(let k = Math.ceil(-g / bl); g + k * bl <= dur; k++){
+        const bar = ((k % 4) + 4) % 4 === 0;
+        if(!bar && !beats) continue;
+        const x = Math.round(X(g + k * bl)) + 0.5;
+        wctx.strokeStyle = bar ? 'rgba(17,17,16,.6)' : 'rgba(17,17,16,.3)';
+        wctx.beginPath(); wctx.moveTo(x, 0); wctx.lineTo(x, bar ? h : h * 0.18);
+        if(!bar){ wctx.moveTo(x, h * 0.82); wctx.lineTo(x, h); }
+        wctx.stroke();
+      }
+    }
+    const lp = t.loop;
+    if(lp && lp.a != null){
+      const ok = lp.b > lp.a;
+      if(ok){ wctx.fillStyle = loopOn ? 'rgba(166,17,17,.32)' : 'rgba(166,17,17,.14)'; wctx.fillRect(X(lp.a), 0, X(lp.b) - X(lp.a), h); }
+      wctx.fillStyle = '#a61111'; wctx.fillRect(X(lp.a), 0, 2, h); if(ok) wctx.fillRect(X(lp.b) - 2, 0, 2, h);
+    }
+    (t.cues || []).forEach((c, i)=>{
+      if(c == null) return;
+      const x = X(c);
+      wctx.fillStyle = '#111110'; wctx.fillRect(x - 1, 0, 2, h); wctx.fillRect(x - 1, 0, 13, 13);
+      wctx.fillStyle = '#e9e5dc'; wctx.font = '700 9px sans-serif'; wctx.fillText(String(i + 1), x + 2.5, 10);
+    });
+  }
+
+  /* ---------- auto-mix: fade into the next song near the end ---------- */
+  // Two audio elements: the main player fades out while a second one fades the next song in
+  // (equal-power curves). When the fade is done, the main player takes over at the same spot.
+  let autoMix = false, fadeSecs = 8, xf = null;
+  const mixBtn = document.getElementById('autoMixBtn'), fadeBtn = document.getElementById('fadeBtn');
+  try{
+    const sv = JSON.parse(localStorage.getItem('looseleaf-automix') || 'null');
+    if(sv){ autoMix = !!sv.on; if([4, 8, 12, 16].includes(sv.secs)) fadeSecs = sv.secs; }
+  }catch(e){}
+  const xfBase = () => volLevel * volLevel;                // same curve the volume slider uses
+  function xfUI(){ mixBtn.classList.toggle('on', autoMix); mixBtn.setAttribute('aria-pressed', String(autoMix)); mixBtn.textContent = xf ? 'fading' : 'auto'; fadeBtn.textContent = fadeSecs + 's'; }
+  function xfSave(){ try{ localStorage.setItem('looseleaf-automix', JSON.stringify({ on: autoMix, secs: fadeSecs })); }catch(e){} }
+  mixBtn.addEventListener('click', ()=>{
+    if(!volWorks){ mixBtn.textContent = 'n/a'; setTimeout(xfUI, 1400); return; }   // some phones ignore element volume, so they can't fade
+    autoMix = !autoMix; if(!autoMix) xfCancel(); xfSave(); xfUI();
+  });
+  document.getElementById('mixNowBtn').addEventListener('click', ()=>{
+    if(!volWorks){ mixBtn.textContent = 'n/a'; setTimeout(xfUI, 1400); return; }
+    const dur = audioEl.duration;
+    if(xf || !djTrack() || !dur || audioEl.paused) return;
+    const remaining = (dur - audioEl.currentTime) / (audioEl.playbackRate || 1);
+    if(remaining <= 1.5){ nextBtn.click(); return; }       // too close to the end to fade: just go
+    xfBegin(Math.min(fadeSecs + 0.3, remaining));
+  });
+  fadeBtn.addEventListener('click', ()=>{ fadeSecs = { 4:8, 8:12, 12:16, 16:4 }[fadeSecs] || 8; xfSave(); xfUI(); });
+  xfUI();
+
+  function xfStop(deck){ deck.pause(); deck.removeAttribute('src'); deck.load(); }
+  function xfCancel(){
+    if(!xf) return;
+    const d = xf.deck; xf = null; xfStop(d);
+    audioEl.volume = xfBase(); xfUI();
+  }
+  function xfBegin(remaining){
+    if(repeatMode === 'one') return;
+    const i = nextIndex(true); if(i < 0 || i === currentIndex) return;     // end of the list: let it end normally
+    const t = LIBRARY[i], deck = new Audio();
+    const startAt = t.cues && t.cues[0] != null ? t.cues[0] : 0;           // enter on its first cue if you set one
+    deck.volume = 0; deck.src = t.url;
+    let rate = tempoRate;
+    const cur = djTrack(), bo = parseFloat(cur.bpm), bi = parseFloat(t.bpm);
+    if(bo > 0 && bi > 0){ const r = bo * tempoRate / bi; if(r >= 0.92 && r <= 1.08) rate = r; }
+    deck.playbackRate = rate; deck.preservesPitch = deck.mozPreservesPitch = deck.webkitPreservesPitch = keyLock;
+    deck.addEventListener('canplay', ()=>{ if(xf && xf.deck === deck){ deck.currentTime = startAt; deck.play().catch(()=>xfCancel()); } }, { once:true });
+    deck.load();
+    xf = { i, deck, rate, from: djTrack(), t0: performance.now(), ms: Math.max(1000, Math.min(fadeSecs, remaining - 0.3) * 1000) };
+    xfUI();
+  }
+  function xfFinish(){
+    const { i, deck, rate } = xf; xf = null; xfUI();
+    wasPlayingBeforeSwitch = true;
+    if(Math.abs(rate - tempoRate) > 0.0005){                // keep the matched tempo: the slider follows it
+      tempoRate = rate; document.getElementById('tempo').value = (rate - 1) * 100;
+    }
+    jumpTo(i);                                             // the main player loads the new song (full UI update)
+    audioEl.volume = xfBase();
+    const pos = deck.currentTime;
+    audioEl.addEventListener('loadedmetadata', ()=>{ audioEl.currentTime = pos; }, { once:true });
+    audioEl.addEventListener('playing', ()=>{              // line up with the second player, then let it go
+      audioEl.addEventListener('seeked', ()=>xfStop(deck), { once:true });
+      audioEl.currentTime = deck.currentTime;
+    }, { once:true });
+    setTimeout(()=>xfStop(deck), 5000);                    // safety: never leave a second player running
+  }
+  (function xfTick(){
+    try{ if(volWorks){
+      const dur = audioEl.duration, t = djTrack();
+      if(xf){
+        if(audioEl.paused || djTrack() !== xf.from) xfCancel();      // paused, or you skipped to another song
+        else {
+          const p = Math.min(1, (performance.now() - xf.t0) / xf.ms), b = xfBase();
+          audioEl.volume = b * Math.cos(p * Math.PI / 2);
+          xf.deck.volume = b * Math.sin(p * Math.PI / 2);
+          if(p >= 1) xfFinish();
+        }
+      } else if(autoMix && t && dur && isFinite(dur) && !audioEl.paused && !loopOn && audioEl.src === new URL(t.url, location.href).href){   // only when this song is what's actually loaded
+        const remaining = (dur - audioEl.currentTime) / (audioEl.playbackRate || 1);
+        if(remaining <= fadeSecs + 0.3 && remaining > 1.5 && dur > fadeSecs * 2) xfBegin(remaining);
+      }
+    } }catch(e){}   // volWorks doesn't exist until startup has finished, so the very first frames must not throw
+    requestAnimationFrame(xfTick);
+  })();
+
+  /* ---------- key shift: pitch moves, tempo doesn't ---------- */
+  // A small delay-line pitch shifter in an AudioWorklet (two crossfading read taps). It is only built the first
+  // time you shift, because routing audio through Web Audio makes some phones stop it when the screen locks.
+  const PS_SRC = `
+    function rd(b, pos, N){ pos = ((pos % N) + N) % N; const i = Math.floor(pos), f = pos - i; return b[i] * (1 - f) + b[(i + 1) % N] * f; }
+    class PS extends AudioWorkletProcessor{
+      static get parameterDescriptors(){ return [{ name:'ratio', defaultValue:1, minValue:0.5, maxValue:2, automationRate:'k-rate' }]; }
+      constructor(){ super(); this.N = 8192; this.G = 2048; this.buf = []; this.w = 0; this.d = 0; }
+      process(inputs, outputs, params){
+        const inp = inputs[0], out = outputs[0];
+        if(!inp || !inp.length || !out.length) return true;
+        const N = this.N, G = this.G, step = 1 - params.ratio[0], len = out[0].length;
+        while(this.buf.length < out.length) this.buf.push(new Float32Array(N));
+        for(let i = 0; i < len; i++){
+          const w = this.w, d1 = this.d, d2 = (d1 + G / 2) % G;
+          const g1 = 0.5 - 0.5 * Math.cos(2 * Math.PI * d1 / G), g2 = 0.5 - 0.5 * Math.cos(2 * Math.PI * d2 / G);
+          for(let c = 0; c < out.length; c++){
+            const b = this.buf[c]; b[w] = inp[Math.min(c, inp.length - 1)][i];
+            out[c][i] = g1 * rd(b, w - d1, N) + g2 * rd(b, w - d2, N);
+          }
+          this.w = (w + 1) % N; this.d = (d1 + step + G) % G;
+        }
+        return true;
+      }
+    }
+    registerProcessor('ps', PS);`;
+  let ksSemi = 0, psCtx = null, psNode = null, psDry = null, psWet = null;
+  async function psEnsure(){
+    if(psCtx) return true;
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();      // made inside the tap, so it may start
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([PS_SRC], { type:'text/javascript' })));
+      const src = ctx.createMediaElementSource(audioEl), node = new AudioWorkletNode(ctx, 'ps');
+      const dry = ctx.createGain(), wet = ctx.createGain(); wet.gain.value = 0;
+      src.connect(dry).connect(ctx.destination); src.connect(node).connect(wet).connect(ctx.destination);
+      psCtx = ctx; psNode = node; psDry = dry; psWet = wet;
+      audioEl.addEventListener('play', ()=>{ if(ctx.state === 'suspended') ctx.resume(); });
+      await ctx.resume();
+      return true;
+    }catch(e){ return false; }
+  }
+  async function ksStep(d){
+    const n = Math.max(-6, Math.min(6, d === 0 ? 0 : ksSemi + d)); if(n === ksSemi) return;
+    if(n !== 0 && !(await psEnsure())){
+      const b = document.getElementById(d > 0 ? 'ksUp' : 'ksDn'); const old = b.textContent;
+      b.textContent = 'n/a'; setTimeout(()=>{ b.textContent = old; }, 1400); return;
+    }
+    ksSemi = n;
+    if(psCtx){
+      const t = psCtx.currentTime;
+      psNode.parameters.get('ratio').value = Math.pow(2, n / 12);
+      psDry.gain.setTargetAtTime(n === 0 ? 1 : 0, t, 0.015); psWet.gain.setTargetAtTime(n === 0 ? 0 : 1, t, 0.015);
+    }
+    document.getElementById('ksVal').textContent = (n > 0 ? '+' : '') + n;
+    if(djTrack()) showMeta(djTrack());
+  }
+  document.getElementById('ksUp').addEventListener('click', ()=>ksStep(1));
+  document.getElementById('ksDn').addEventListener('click', ()=>ksStep(-1));
+  document.getElementById('ksZero').addEventListener('click', ()=>ksStep(0));
+
+  /* ---------- helpers ---------- */
+  function titleFromFilename(name){
+    const noExt = name.replace(/\.[a-zA-Z0-9]+$/, '');
+    const spaced = noExt.replace(/[_\-]+/g, ' ').trim();
+    return spaced.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1));
+  }
+
+  function formatTime(sec){
+    if(!isFinite(sec) || sec < 0) sec = 0;
+    const m = Math.floor(sec/60);
+    const s = Math.floor(sec%60);
+    return `${m}:${s.toString().padStart(2,'0')}`;
+  }
+
+  /* ---------- DOM refs ---------- */
+  const titleEl = document.getElementById('title');
+  const trackIndexEl = document.getElementById('trackIndex');
+  const artistEl = document.getElementById('artist');
+  const metaKey = document.getElementById('metaKey');
+  const metaBpm = document.getElementById('metaBpm');
+  const card = document.getElementById('card');
+  const playIcon = document.getElementById('playIcon');
+  const playBtn = document.getElementById('play');
+  const prevBtn = document.getElementById('prev');
+  const nextBtn = document.getElementById('next');
+  const letterRail = document.getElementById('letterRail');
+  const curTimeEl = document.getElementById('curTime');
+  const durTimeEl = document.getElementById('durTime');
+
+  function buildLetterRail(){
+    letterRail.innerHTML = '';
+    letters.forEach(L=>{
+      const el = document.createElement('div');
+      el.className = 'letter';
+      el.textContent = L;
+      el.dataset.letter = L;
+      letterRail.appendChild(el);
+    });
+  }
+
+  function updateLetterRail(){
+    if(currentIndex < 0) return;
+    const activeLetter = LIBRARY[currentIndex].letter;
+    [...letterRail.children].forEach(el=>{
+      el.classList.toggle('active', el.dataset.letter === activeLetter);
+    });
+    updateListActive();
+  }
+
+  // counter + rail + list highlight, without reloading the audio
+  function refreshChrome(){
+    if(currentIndex < 0) return;
+    trackIndexEl.textContent = `[ ${String(currentIndex+1).padStart(2,'0')} / ${String(LIBRARY.length).padStart(2,'0')} ]`;
+    updateLetterRail();
+  }
+
+  function rebuildLettersAndSort(){
+    const bpmOf = t => { const n = parseFloat(t.bpm); return isFinite(n) ? n : 1e9; };
+    const keyOf = t => { const p = normKey(t.key); return p ? camNum(p)*2 + (p.minor ? 0 : 1) : 1e9; };
+    const ordOf = t => { const i = ((currentVault && currentVault.order) || []).indexOf(t._fk); return i < 0 ? 1e9 : i; };
+    const by = { mine:(a,b)=>ordOf(a)-ordOf(b), title:()=>0, bpm:(a,b)=>bpmOf(a)-bpmOf(b), key:(a,b)=>keyOf(a)-keyOf(b) }[sortMode];
+    LIBRARY.sort((a,b)=> by(a,b) || a.title.localeCompare(b.title));
+    LIBRARY.forEach(t => t.letter = (t.title[0] || '#').toUpperCase());
+    letters = [...new Set(LIBRARY.map(t=>t.letter))].sort();
+    buildLetterRail();
+    renderList();
+  }
+
+  function resort(){
+    const cur = LIBRARY[currentIndex];
+    rebuildLettersAndSort();
+    if(cur){ currentIndex = LIBRARY.indexOf(cur); refreshChrome(); }
+  }
+
+  /* ---------- playlist (every row is a button) ---------- */
+  function keyLabel(t){ return (t.keyGuess ? '~' : '') + fmtKey(t.key); }
+  function bpmLabel(t){ return (t.bpmGuess ? '~' : '') + (t.bpm || '—') + (t.bpmGuess && t.bpmLow ? '?' : ''); }
+  function showMeta(t){
+    const b = parseFloat(t.bpm);
+    metaBpm.textContent = bpmLabel(t) + (tempoRate !== 1 && isFinite(b) ? ` → ${(b*tempoRate).toFixed(1)}` : '');
+    let k = keyLabel(t);
+    const st = ksSemi + (tempoRate !== 1 && !keyLock ? Math.round(12*Math.log2(tempoRate)) : 0);   // key shift + (with key lock off) speed-driven shift
+    if(st !== 0){
+      const p = normKey(t.key);
+      if(p){ const q = { pc: (p.pc + st + 120) % 12, minor: p.minor }; k = `≈ ${PITCHES[q.pc]}${q.minor ? 'm' : ''} · ${camNum(q)}${q.minor ? 'A' : 'B'}`; }
+    }
+    metaKey.textContent = k;
+  }
+
+  function fillRow(t, i){
+    const r = t._row; if(!r) return;
+    r.children[0].textContent = String(i+1).padStart(2,'0');
+    r.children[1].textContent = t.title + (t.artist ? ' — ' + t.artist : '');
+    r.children[2].textContent = keyLabel(t);
+    r.children[3].textContent = bpmLabel(t);
+  }
+
+  function renderList(){
+    listEl.innerHTML = '';
+    listEl.dataset.mode = sortMode;
+    LIBRARY.forEach((t, i)=>{
+      const row = document.createElement('button');
+      row.className = 'trow';
+      row.innerHTML = '<span class="tn"></span><span class="tt"></span><span class="tk"></span><span class="tb"></span><span class="tc"><i class="gr" title="Drag to reorder">≡</i><i class="up">▲</i><i class="dn">▼</i><i class="rm">×</i></span>';
+      row.addEventListener('pointerdown', (e)=>{ if(e.target.closest('.gr')) startRowDrag(t, e); });
+      row.addEventListener('click', (e)=>{
+        if(justDragged) return;
+        const act = e.target.closest('.tc i'); if(act){ if(act.classList.contains('gr')) return; rowAction(t, act.className); return; }
+        if(LIBRARY[currentIndex] === t){ playBtn.click(); return; }   // tapping the current song toggles play/pause
+        const from = currentIndex;
+        wasPlayingBeforeSwitch = true;
+        currentIndex = LIBRARY.indexOf(t);
+        transitionCard(currentIndex > from ? 'right' : 'left');
+      });
+      t._row = row;
+      listEl.appendChild(row);
+      fillRow(t, i);
+    });
+    updateListActive();
+  }
+
+  // Harmonic + tempo match: same/adjacent Camelot key (or relative major/minor) within 6% BPM.
+  function compatible(cp, cb, t){
+    const p = normKey(t.key), b = parseFloat(t.bpm);
+    if(!cp || !p || !isFinite(cb) || !isFinite(b)) return false;
+    const d = Math.abs(camNum(cp) - camNum(p)), near = Math.min(d, 12-d);
+    const keyOk = cp.minor === p.minor ? near <= 1 : near === 0;
+    return keyOk && Math.abs(b - cb) / cb <= 0.06;
+  }
+
+  function updateListActive(){
+    const cur = LIBRARY[currentIndex];
+    const cp = cur ? normKey(cur.key) : null, cb = cur ? parseFloat(cur.bpm) * tempoRate : NaN;   // match against the tempo you're actually hearing
+    LIBRARY.forEach(t=>{
+      if(!t._row) return;
+      t._row.classList.toggle('active', t === cur);
+      const m = !!cur && t !== cur && compatible(cp, cb, t);
+      t._row.classList.toggle('match', m);
+      const kp = normKey(t.key);
+      const keyHide = !!keyFilter && t !== cur && !(kp && camNum(kp) === keyFilter.num && kp.minor === keyFilter.minor);
+      t._row.hidden = (matchOnly && t !== cur && !m) || keyHide;
+    });
+    if(cur && cur._row) cur._row.scrollIntoView({ block:'nearest' });
+  }
+
+  function render(){
+    if(currentIndex < 0 || !LIBRARY.length) return;
+    const track = LIBRARY[currentIndex];
+    trackIndexEl.textContent = `[ ${String(currentIndex+1).padStart(2,'0')} / ${String(LIBRARY.length).padStart(2,'0')} ]`;
+    titleEl.textContent = track.title;
+    playedKeys.add(track._fk);
+    if(lastShown && lastShown !== track && !goingBack){ playHistory.push(lastShown); if(playHistory.length > 200) playHistory.shift(); }
+    goingBack = false; lastShown = track; shuffleSeen.add(track);
+    const bigLetterEl = document.getElementById('bigLetter');
+    bigLetterEl.textContent = track.letter || '';
+    [titleEl, artistEl, bigLetterEl].forEach(el=>{ el.classList.remove('slam'); void el.offsetWidth; el.classList.add('slam'); });
+    artistEl.textContent = track.artist || '';
+    showMeta(track);
+    renderArt(track);
+    resizeWaveCanvas();
+
+    prevBtn.disabled = LIBRARY.length < 2;
+    nextBtn.disabled = LIBRARY.length < 2;
+
+    loadTrackIntoAudio(track);
+    applyTempo();
+    updateLetterRail();
+    document.title = `${track.title}${track.artist ? ' — ' + track.artist : ''}`;
+    updateMediaSession(track);
+  }
+
+  function loadTrackIntoAudio(track){
+    const shouldAutoplay = wasPlayingBeforeSwitch;
+    audioEl.pause();
+    audioEl.src = track.url;
+    audioEl.load();
+    curTimeEl.textContent = '0:00';
+    durTimeEl.textContent = track.duration ? formatTime(track.duration) : '0:00';
+    loopOn = false; djSync();
+    drawWave(track.peaks, 0);
+
+    if(!track.peaks){
+      decodingNote.classList.add('active');
+      analyzeTrack(track).then(()=>decodingNote.classList.remove('active'));
+    }
+
+    if(shouldAutoplay){
+      audioEl.play().catch(()=>{ setPlayIcon(false); });
+    } else {
+      setPlayIcon(false);
+    }
+  }
+
+  function setPlayIcon(isPlaying){
+    document.body.classList.toggle('playing', isPlaying);
+    playIcon.innerHTML = isPlaying
+      ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>'
+      : '<path d="M8 5v14l11-7z"/>';
+  }
+
+  /* ---------- audio element events drive the real UI state ---------- */
+  audioEl.addEventListener('play', ()=>{ setPlayIcon(true); wasPlayingBeforeSwitch = true; });
+  audioEl.addEventListener('pause', ()=>{ setPlayIcon(false); wasPlayingBeforeSwitch = false; if(xf) xfCancel(); });   // skipping or pausing mid-fade cancels it
+  audioEl.addEventListener('timeupdate', ()=>{
+    if(currentIndex < 0) return;
+    const track = LIBRARY[currentIndex];
+    const dur = audioEl.duration || track.duration || 0;
+    curTimeEl.textContent = formatTime(audioEl.currentTime);
+    if(dur) durTimeEl.textContent = formatTime(dur);
+    if(track.peaks) drawWave(track.peaks, dur ? audioEl.currentTime/dur : 0);
+  });
+  audioEl.addEventListener('loadedmetadata', ()=>{
+    if(currentIndex < 0) return;
+    const track = LIBRARY[currentIndex];
+    if(!track.duration || track.duration === Infinity) track.duration = audioEl.duration;
+    durTimeEl.textContent = formatTime(audioEl.duration);
+  });
+  audioEl.addEventListener('ended', ()=>{
+    if(xf){ xfFinish(); return; }
+    if(repeatMode === 'one'){ audioEl.currentTime = 0; audioEl.play().catch(()=>{}); return; }
+    const i = nextIndex(true);
+    if(i < 0){ wasPlayingBeforeSwitch = false; setPlayIcon(false); syncPlaybackState(); return; }   // end of the list, repeat is off
+    wasPlayingBeforeSwitch = true;
+    jumpTo(i);          // no card animation here: phones only let the next song start straight away, not after a timer
+  });
+
+  /* ---------- shuffle, repeat, volume ---------- */
+  const shuffleBtn = document.getElementById('shuffle'), repeatBtn = document.getElementById('repeat');
+  const REPEAT_ORDER = ['off', 'all', 'one'];
+  const REPEAT_SVG = '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>';
+  let shuffleOn = false, repeatMode = 'off';
+  const playHistory = [], shuffleSeen = new Set();   // history powers "previous" while shuffling
+  let lastShown = null, goingBack = false;
+  const store = (k, v) => { try{ localStorage.setItem('looseleaf.' + k, v); }catch(e){} };
+  const recall = k => { try{ return localStorage.getItem('looseleaf.' + k); }catch(e){ return null; } };
+
+  // Which song plays next. `auto` = the song just ended by itself (returns -1 to stop at the end of the list).
+  function nextIndex(auto){
+    const n = LIBRARY.length; if(!n) return -1;
+    const cur = LIBRARY[currentIndex];
+    if(shuffleOn && n > 1){
+      let pool = LIBRARY.filter(t => t !== cur && !shuffleSeen.has(t));      // every song plays once before any repeats
+      if(!pool.length){
+        if(auto && repeatMode !== 'all') return -1;
+        shuffleSeen.clear(); if(cur) shuffleSeen.add(cur);
+        pool = LIBRARY.filter(t => t !== cur);
+      }
+      return LIBRARY.indexOf(pool[Math.floor(Math.random() * pool.length)]);
+    }
+    if(currentIndex + 1 < n) return currentIndex + 1;
+    return (auto && repeatMode !== 'all') ? -1 : 0;
+  }
+  function prevIndex(){
+    if(shuffleOn){
+      while(playHistory.length){
+        const i = LIBRARY.indexOf(playHistory.pop());
+        if(i >= 0 && i !== currentIndex){ goingBack = true; return i; }
+      }
+    }
+    const n = LIBRARY.length; return (currentIndex - 1 + n) % n;
+  }
+  function jumpTo(i){ currentIndex = i; render(); }   // switch song right now, no animation
+
+  function setShuffle(on, save){
+    shuffleOn = !!on;
+    shuffleBtn.classList.toggle('on', shuffleOn);
+    shuffleBtn.setAttribute('aria-pressed', String(shuffleOn));
+    shuffleBtn.setAttribute('aria-label', 'Shuffle: ' + (shuffleOn ? 'on' : 'off'));
+    shuffleBtn.title = 'Shuffle: ' + (shuffleOn ? 'on' : 'off') + ' (s)';
+    if(shuffleOn){ shuffleSeen.clear(); const c = LIBRARY[currentIndex]; if(c) shuffleSeen.add(c); }
+    if(save !== false) store('shuffle', shuffleOn ? '1' : '0');
+  }
+  function setRepeat(mode, save){
+    repeatMode = REPEAT_ORDER.includes(mode) ? mode : 'off';
+    repeatBtn.classList.toggle('on', repeatMode !== 'off');
+    repeatBtn.querySelector('svg').innerHTML = REPEAT_SVG + (repeatMode === 'one' ? '<path d="M11 10h1v4"/>' : '');
+    repeatBtn.setAttribute('aria-label', 'Repeat: ' + repeatMode);
+    repeatBtn.title = 'Repeat: ' + repeatMode + ' (r)';
+    if(save !== false) store('repeat', repeatMode);
+  }
+  shuffleBtn.addEventListener('click', ()=>setShuffle(!shuffleOn));
+  repeatBtn.addEventListener('click', ()=>setRepeat(REPEAT_ORDER[(REPEAT_ORDER.indexOf(repeatMode) + 1) % 3]));
+
+  // Advanced (DJ) controls — tempo, cues, loop, key shift, auto-mix, volume —
+  // stay tucked away by default so the everyday player isn't a wall of rows.
+  // Remembers whether you left it open, same as shuffle/repeat/volume.
+  const advancedToggle = document.getElementById('advancedToggle');
+  const advancedPanel = document.getElementById('advancedPanel');
+  function setAdvanced(on, save){
+    const isOn = !!on;
+    advancedPanel.classList.toggle('hidden', !isOn);
+    advancedToggle.setAttribute('aria-expanded', String(isOn));
+    if(save !== false) store('advanced', isOn ? '1' : '0');
+  }
+  advancedToggle.addEventListener('click', ()=>setAdvanced(advancedToggle.getAttribute('aria-expanded') !== 'true'));
+
+  // Volume. The slider is what you feel; the audio level follows a curve so the low end isn't all crammed at the top.
+  // iPhones and iPads ignore page volume (hardware buttons only), so the slider hides itself there.
+  const volEl = document.getElementById('vol'), volVal = document.getElementById('volVal'), muteBtn = document.getElementById('muteBtn'), volRow = document.getElementById('volRow');
+  let volLevel = 1, lastVol = 1;
+  const volWorks = (()=>{ try{ const old = audioEl.volume; audioEl.volume = 0.5; const ok = Math.abs(audioEl.volume - 0.5) < 0.01; audioEl.volume = old; return ok; }catch(e){ return false; } })();
+  if(!volWorks) volRow.classList.add('hidden');
+  function setVolume(v, save){
+    volLevel = Math.min(1, Math.max(0, v));
+    audioEl.volume = volLevel * volLevel;
+    volEl.value = volLevel; volVal.textContent = Math.round(volLevel * 100) + '%';
+    muteBtn.classList.toggle('on', volLevel === 0);
+    muteBtn.setAttribute('aria-label', volLevel === 0 ? 'Unmute' : 'Mute');
+    if(save !== false) store('vol', String(volLevel));
+  }
+  volEl.addEventListener('input', ()=>{ const v = parseFloat(volEl.value); if(v > 0) lastVol = v; setVolume(v); });
+  muteBtn.addEventListener('click', ()=>{ if(!volWorks) return; if(volLevel > 0){ lastVol = volLevel; setVolume(0); } else setVolume(lastVol || 1); });
+
+  /* ---------- lock screen, headphones and media keys ---------- */
+  const hasMS = 'mediaSession' in navigator;
+  function updateMediaSession(track){
+    if(!hasMS || !window.MediaMetadata) return;
+    try{
+      const art = [];
+      if(track.artUrl) art.push({ src: track.artUrl, sizes: '512x512' });
+      else { try{ art.push({ src: artCanvas.toDataURL('image/png'), sizes: artCanvas.width + 'x' + artCanvas.height, type: 'image/png' }); }catch(e){} }
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title || 'untitled', artist: track.artist || 'looseleaf',
+        album: currentVault ? currentVault.name : 'looseleaf', artwork: art
+      });
+    } catch(e){}
+    syncPlaybackState();
+  }
+  function syncPlaybackState(){
+    if(!hasMS) return;
+    try{ navigator.mediaSession.playbackState = LIBRARY.length ? (audioEl.paused ? 'paused' : 'playing') : 'none'; }catch(e){}
+  }
+  let lastPosSent = 0;
+  function syncPosition(force){
+    if(!hasMS || !navigator.mediaSession.setPositionState) return;
+    const now = Date.now(); if(!force && now - lastPosSent < 1000) return; lastPosSent = now;
+    const d = audioEl.duration;
+    if(!isFinite(d) || d <= 0) return;
+    try{ navigator.mediaSession.setPositionState({ duration: d, playbackRate: audioEl.playbackRate || 1, position: Math.min(audioEl.currentTime, d) }); }catch(e){}
+  }
+  if(hasMS){
+    const on = (a, fn) => { try{ navigator.mediaSession.setActionHandler(a, fn); }catch(e){} };
+    on('play', ()=>{ audioEl.play().catch(()=>{}); });
+    on('pause', ()=>{ audioEl.pause(); });
+    on('previoustrack', ()=>{
+      if(!LIBRARY.length) return;
+      if(audioEl.currentTime > 3){ audioEl.currentTime = 0; return; }
+      jumpTo(prevIndex());
+    });
+    on('nexttrack', ()=>{ const i = nextIndex(false); if(i >= 0) jumpTo(i); });
+    on('seekto', d=>{
+      if(d.fastSeek && 'fastSeek' in audioEl) audioEl.fastSeek(d.seekTime); else audioEl.currentTime = d.seekTime;
+      syncPosition(true);
+    });
+    ['play', 'pause', 'seeked', 'ratechange', 'loadedmetadata', 'durationchange'].forEach(ev => audioEl.addEventListener(ev, ()=>{ syncPlaybackState(); syncPosition(true); }));
+    audioEl.addEventListener('timeupdate', ()=>syncPosition(false));
+  }
+
+  /* ---------- navigation ---------- */
+  function goTo(newIndex, dir){
+    if(!LIBRARY.length) return;
+    const n = LIBRARY.length;
+    newIndex = ((newIndex % n) + n) % n;
+    currentIndex = newIndex;
+    transitionCard(dir);
+  }
+
+  function goToLetter(direction){
+    if(!LIBRARY.length || letters.length < 2) return;
+    const currentLetter = LIBRARY[currentIndex].letter;
+    let li = letters.indexOf(currentLetter);
+    li = ((li + direction) % letters.length + letters.length) % letters.length;
+    const targetLetter = letters[li];
+    const idx = LIBRARY.findIndex(t=>t.letter === targetLetter);
+    currentIndex = idx;
+    transitionCard(direction < 0 ? 'up' : 'down');
+  }
+
+  function transitionCard(dir){
+    card.classList.add('leaving-'+dir);
+    setTimeout(()=>{
+      render();
+      card.classList.remove('leaving-'+dir);
+    }, 160);
+  }
+
+  /* ---------- controls ---------- */
+  prevBtn.addEventListener('click', ()=>{
+    if(audioEl.currentTime > 3){ audioEl.currentTime = 0; return; }   // standard: restart first, then go back
+    if(LIBRARY.length) goTo(prevIndex(), 'left');
+  });
+  nextBtn.addEventListener('click', ()=>{ const i = nextIndex(false); if(i >= 0) goTo(i, 'right'); });
+  playBtn.addEventListener('click', ()=>{
+    if(audioEl.paused) audioEl.play().catch(()=>{});
+    else audioEl.pause();
+  });
+  waveCanvas.addEventListener('click', (e)=>{
+    if(currentIndex < 0) return;
+    const track = LIBRARY[currentIndex];
+    const dur = audioEl.duration || track.duration;
+    if(!dur) return;
+    const rect = waveCanvas.getBoundingClientRect();
+    const ratio = Math.min(0.999, Math.max(0,(e.clientX-rect.left)/rect.width));
+    audioEl.currentTime = ratio * dur;
+  });
+
+  /* keyboard */
+  window.addEventListener('keydown', (e)=>{
+    if(e.ctrlKey || e.metaKey || e.altKey) return;
+    const typing = e.target.tagName === 'INPUT' && e.target.type !== 'range';   // chip or rename box
+    if(typing) return;
+    if(e.key === 's' || e.key === 'S') setShuffle(!shuffleOn);
+    if(e.key === 'r' || e.key === 'R') setRepeat(REPEAT_ORDER[(REPEAT_ORDER.indexOf(repeatMode) + 1) % 3]);
+    if(e.key === 'm' || e.key === 'M') muteBtn.click();
+    if(/^[1-4]$/.test(e.key)) cuePad(+e.key - 1);
+    if(e.key === 'l' || e.key === 'L') loopBtnEl.click();
+    if(e.target.tagName === 'INPUT') return;   // a focused slider keeps its own arrow keys
+    if(['ArrowRight','ArrowLeft','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+    if(e.key === 'ArrowRight') goTo(currentIndex+1,'right');
+    if(e.key === 'ArrowLeft') goTo(currentIndex-1,'left');
+    if(e.key === 'ArrowUp') goToLetter(-1);
+    if(e.key === 'ArrowDown') goToLetter(1);
+    if(e.key === ' '){ if(audioEl.paused) audioEl.play().catch(()=>{}); else audioEl.pause(); }
+  });
+
+  /* ---------- navigation helpers (no animation — used by both button/keyboard and drag paths) ---------- */
+  function letterTargetIndex(direction){
+    if(!LIBRARY.length || letters.length < 2) return currentIndex;
+    const currentLetter = LIBRARY[currentIndex].letter;
+    let li = letters.indexOf(currentLetter);
+    li = ((li + direction) % letters.length + letters.length) % letters.length;
+    const targetLetter = letters[li];
+    return LIBRARY.findIndex(t=>t.letter === targetLetter);
+  }
+
+  /* ---------- swipe: live drag-follow ---------- */
+  const DRAG_DEADZONE = 6;      // px of movement before we lock an axis
+  const COMMIT_DISTANCE = 70;   // px dragged to commit a navigation
+  const COMMIT_VELOCITY = 0.55; // px/ms — a fast flick commits even under the distance threshold
+  const EXIT_X = 260;
+  const EXIT_Y = 170;
+
+  let dragging = false;
+  let dragAxis = null;      // 'x' | 'y' | null
+  let startX=0, startY=0, dx=0, dy=0;
+  let lastMoveX=0, lastMoveY=0, lastMoveT=0, velocity=0;
+
+  function applyDragTransform(){
+    const tx = dragAxis === 'x' ? dx : 0;
+    const ty = dragAxis === 'y' ? dy : 0;
+    card.style.transform = `translate(${tx}px, ${ty}px)`;
+  }
+
+  function resetCardStyle(animated){
+    card.style.transition = animated ? 'transform .16s linear' : 'none';
+    card.style.transform = 'translate(0,0)';
+    card.style.opacity = '1';
+    if(animated) scheduleClearInlineStyle(200);
+  }
+
+  // Inline styles (transform/opacity/transition) drive the live drag, but once a
+  // gesture has settled we hand control back to the stylesheet — otherwise the
+  // higher-specificity inline values would permanently block the CSS-class-based
+  // transitions used by keyboard/button navigation.
+  let clearTimer = null;
+  function scheduleClearInlineStyle(delay){
+    if(clearTimer) clearTimeout(clearTimer);
+    clearTimer = setTimeout(()=>{
+      if(!dragging){
+        card.style.transition = '';
+        card.style.transform = '';
+        card.style.opacity = '';
+      }
+      clearTimer = null;
+    }, delay);
+  }
+
+  function commitDrag(){
+    if(!LIBRARY.length){ resetCardStyle(true); return; }
+    card.classList.remove('dragging');
+    card.style.transition = 'transform .14s linear, opacity .14s linear';
+
+    let exitX=0, exitY=0, nextIdx=currentIndex;
+    if(dragAxis === 'x'){
+      if(dx < 0){ exitX = -EXIT_X; nextIdx = (currentIndex+1)%LIBRARY.length; }
+      else      { exitX =  EXIT_X; nextIdx = (currentIndex-1+LIBRARY.length)%LIBRARY.length; }
+    } else if(dragAxis === 'y'){
+      if(dy < 0){ exitY = -EXIT_Y; nextIdx = letterTargetIndex(-1); }
+      else      { exitY =  EXIT_Y; nextIdx = letterTargetIndex(1); }
+    }
+
+    card.style.transform = `translate(${exitX}px, ${exitY}px)`;
+    card.style.opacity = '0';
+
+    setTimeout(()=>{
+      currentIndex = nextIdx;
+      render();
+      // enter from the opposite side, then cut straight to center — no ease, no bounce
+      card.style.transition = 'none';
+      card.style.transform = `translate(${-exitX*0.4}px, ${-exitY*0.4}px)`;
+      card.style.opacity = '0';
+      void card.offsetWidth; // force reflow so the entrance transition below actually animates
+      card.style.transition = 'transform .16s linear, opacity .16s linear';
+      resetCardStyle(true);
+    }, 140);
+  }
+
+  function endDrag(committed){
+    if(committed) commitDrag();
+    else {
+      card.classList.remove('dragging');
+      resetCardStyle(true);
+    }
+    dragging = false;
+    dragAxis = null;
+  }
+
+  document.body.addEventListener('pointerdown', (e)=>{
+    if(e.target.closest('button, input, #letterRail, #wave, #tracklist')) return;
+    if(clearTimer){ clearTimeout(clearTimer); clearTimer = null; }
+    dragging = true;
+    dragAxis = null;
+    startX = lastMoveX = e.clientX;
+    startY = lastMoveY = e.clientY;
+    lastMoveT = performance.now();
+    velocity = 0;
+    dx = dy = 0;
+  });
+
+  document.body.addEventListener('pointermove', (e)=>{
+    if(!dragging) return;
+    dx = e.clientX - startX;
+    dy = e.clientY - startY;
+
+    if(!dragAxis){
+      if(Math.abs(dx) < DRAG_DEADZONE && Math.abs(dy) < DRAG_DEADZONE) return;
+      dragAxis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      card.classList.add('dragging');
+    }
+
+    const now = performance.now();
+    const dt = Math.max(1, now - lastMoveT);
+    const primaryDelta = dragAxis === 'x' ? (e.clientX - lastMoveX) : (e.clientY - lastMoveY);
+    velocity = primaryDelta / dt;
+    lastMoveX = e.clientX; lastMoveY = e.clientY; lastMoveT = now;
+
+    applyDragTransform();
+  });
+
+  function handlePointerEnd(){
+    if(!dragging) return;
+    if(!dragAxis){ dragging = false; return; } // never moved past deadzone — treat as a tap
+    const distance = dragAxis === 'x' ? Math.abs(dx) : Math.abs(dy);
+    const committed = distance > COMMIT_DISTANCE || Math.abs(velocity) > COMMIT_VELOCITY;
+    endDrag(committed);
+  }
+
+  document.body.addEventListener('pointerup', handlePointerEnd);
+  document.body.addEventListener('pointercancel', handlePointerEnd);
+
+  window.addEventListener('resize', ()=>{
+    resizeWaveCanvas();
+    if(currentIndex>=0){
+      const track = LIBRARY[currentIndex];
+      const dur = audioEl.duration || track.duration || 1;
+      drawWave(track.peaks, audioEl.currentTime/dur);
+    }
+  });
+
+  /* ---------- persistence: a name, and a list of named vaults (folders) ---------- */
+  const IDB_NAME = 'looseleaf';
+  const IDB_STORE = 'handles';
+  const VAULTS_KEY = 'vaultList';
+  const NAME_KEY = 'rootName';
+
+  function idbOpen(){
+    return new Promise((resolve,reject)=>{
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(IDB_STORE); };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function idbSet(key, value){
+    try{
+      const db = await idbOpen();
+      return new Promise((resolve,reject)=>{
+        const tx = db.transaction(IDB_STORE,'readwrite');
+        tx.objectStore(IDB_STORE).put(value, key);
+        tx.oncomplete = ()=>resolve(true);
+        tx.onerror = ()=>reject(tx.error);
+      });
+    } catch(e){ return false; }
+  }
+  async function idbGet(key){
+    try{
+      const db = await idbOpen();
+      return new Promise((resolve,reject)=>{
+        const tx = db.transaction(IDB_STORE,'readonly');
+        const req = tx.objectStore(IDB_STORE).get(key);
+        req.onsuccess = ()=>resolve(req.result || null);
+        req.onerror = ()=>reject(req.error);
+      });
+    } catch(e){ return null; }
+  }
+
+  async function saveVaults(){ return await idbSet(VAULTS_KEY, vaults); }
+
+  /* ---------- walking a real directory of files ---------- */
+  const AUDIO_NAME_RE = /\.(mp3|wav|ogg|m4a|flac|aac)$/i;
+
+  async function* walkDirectory(dirHandle){
+    for await (const [, handle] of dirHandle.entries()){
+      if(handle.kind === 'file'){
+        if(AUDIO_NAME_RE.test(handle.name)) yield handle;
+      } else if(handle.kind === 'directory'){
+        yield* walkDirectory(handle);
+      }
+    }
+  }
+
+  async function collectFilesFromDirectory(dirHandle){
+    const files = [];
+    for await (const fileHandle of walkDirectory(dirHandle)){
+      try{ files.push(await fileHandle.getFile()); } catch(e){ /* skip unreadable file */ }
+    }
+    return files;
+  }
+
+  function revokeTrackUrls(track){
+    if(track.url) URL.revokeObjectURL(track.url);
+    if(track.artUrl) URL.revokeObjectURL(track.artUrl);
+  }
+
+  function clearLibrary(){
+    audioEl.pause();
+    audioEl.removeAttribute('src');
+    LIBRARY.forEach(revokeTrackUrls);
+    LIBRARY = [];
+    letters = [];
+    currentIndex = -1;
+    keyFilter = null; playedKeys.clear();
+    playHistory.length = 0; lastShown = null; shuffleSeen.clear();
+    if('mediaSession' in navigator){ try{ navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; }catch(e){} }
+    buildLetterRail();
+    stage.classList.add('hidden');
+  }
+
+  function setLibraryLabel(name){
+    libraryLabel.textContent = name ? `vault: ${name}` : '';
+  }
+
+  /* ---------- where a vault's songs live ----------
+     link : a real folder on this device (Chrome, Edge). Nothing is copied, so nothing can be evicted.
+     opfs : copies in the browser's private file storage (Chrome, Edge, Firefox, Safari).
+     idb  : copies inside IndexedDB. Older vaults, or browsers with no private file storage. */
+  const FSA_OK = typeof window.showDirectoryPicker === 'function';
+  let OPFS_OK = false;
+  const kindOf = v => v.kind || (v.dirHandle ? 'link' : 'idb');
+  const fkOf = f => `${f.name}|${f.size}|${f.lastModified}`;
+  const songCount = v => kindOf(v) === 'link' ? (v.count || 0) : (v.songs || v.files || []).length;
+  const newVaultId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  function newVault(name, extra){
+    return Object.assign({ id: newVaultId(), name, kind: OPFS_OK ? 'opfs' : 'idb' }, OPFS_OK ? { songs: [] } : { files: [] }, extra || {});
+  }
+  const fmtBytes = n => n >= 1e9 ? (n/1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n/1e6) + ' MB' : Math.round(n/1e3) + ' KB';
+  const ago = ms => { const d = Math.floor((Date.now() - ms) / 86400000); return d < 1 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
+
+  const toastEl = document.getElementById('toast'); let toastTimer = 0;
+  function busy(msg){ clearTimeout(toastTimer); if(msg){ toastEl.textContent = msg; toastEl.classList.add('on'); } else toastEl.classList.remove('on'); }
+  function toast(msg, ms){ busy(msg); toastTimer = setTimeout(()=>toastEl.classList.remove('on'), ms || 5000); }
+
+  async function detectOpfs(){
+    try{
+      if(!(navigator.storage && navigator.storage.getDirectory)) return false;
+      const root = await navigator.storage.getDirectory();
+      await root.getDirectoryHandle('looseleaf', { create: true });
+      return true;
+    } catch(e){ return false; }
+  }
+  async function opfsVaultDir(vault, create){
+    const root = await navigator.storage.getDirectory();
+    const top = await root.getDirectoryHandle('looseleaf', { create: true });
+    return top.getDirectoryHandle(vault.id, { create: !!create });
+  }
+  async function opfsDropVault(vault){
+    try{ const root = await navigator.storage.getDirectory(); const top = await root.getDirectoryHandle('looseleaf'); await top.removeEntry(vault.id, { recursive: true }); } catch(e){}
+  }
+  async function opfsDropSong(vault, key){
+    try{ const d = await opfsVaultDir(vault, false); await d.removeEntry(key); } catch(e){}
+  }
+
+  // Some Safari versions can't stream into a file from the page itself, but every browser
+  // with private file storage can write from a worker. Used only when createWritable is missing.
+  let opfsWorker = null, workerSeq = 0; const workerJobs = new Map();
+  function workerWrite(vid, key, file){
+    if(!opfsWorker){
+      const body = function(){
+        self.onmessage = async e => {
+          const m = e.data;
+          try{
+            const root = await navigator.storage.getDirectory();
+            const top = await root.getDirectoryHandle('looseleaf', { create: true });
+            const dir = await top.getDirectoryHandle(m.vid, { create: true });
+            const fh = await dir.getFileHandle(m.key, { create: true });
+            const ah = await fh.createSyncAccessHandle();
+            try{
+              ah.truncate(0);
+              let off = 0; const CH = 4 * 1024 * 1024;
+              while(off < m.file.size){
+                const buf = new Uint8Array(await m.file.slice(off, off + CH).arrayBuffer());
+                ah.write(buf, { at: off }); off += buf.length;
+              }
+              ah.flush();
+            } finally { ah.close(); }
+            self.postMessage({ id: m.id, ok: true });
+          } catch(err){ self.postMessage({ id: m.id, ok: false, name: err && err.name, msg: String(err && err.message || err) }); }
+        };
+      };
+      opfsWorker = new Worker(URL.createObjectURL(new Blob(['(' + body.toString() + ')()'], { type: 'text/javascript' })));
+      opfsWorker.onmessage = e => {
+        const d = e.data, j = workerJobs.get(d.id); if(!j) return; workerJobs.delete(d.id);
+        if(d.ok) j.res(); else j.rej(Object.assign(new Error(d.msg), { name: d.name || 'Error' }));
+      };
+      opfsWorker.onerror = () => { workerJobs.forEach(j => j.rej(new Error('worker failed'))); workerJobs.clear(); opfsWorker = null; };
+    }
+    return new Promise((res, rej)=>{ const id = ++workerSeq; workerJobs.set(id, { res, rej }); opfsWorker.postMessage({ id, vid, key, file }); });
+  }
+  async function opfsPut(vault, dir, key, file){
+    const fh = await dir.getFileHandle(key, { create: true });
+    if(typeof fh.createWritable === 'function'){
+      const w = await fh.createWritable();
+      try{ await w.write(file); await w.close(); }
+      catch(e){ try{ await w.abort(); }catch(_){} throw e; }
+    } else {
+      await workerWrite(vault.id, key, file);
+    }
+  }
+  const newKey = name => Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + ((String(name).match(/\.[a-z0-9]{1,5}$/i) || [''])[0]);
+
+  // Reads a vault's copies back. The File objects are backed by the stored files, not held in memory.
+  async function opfsFiles(vault){
+    const files = [], missing = [], failed = [];
+    let dir = null;
+    try{ dir = await opfsVaultDir(vault, false); } catch(e){ if(!(e && e.name === 'NotFoundError')) throw e; }
+    for(const rec of (vault.songs || [])){
+      if(!dir){ missing.push(rec); continue; }
+      try{
+        const f = await (await dir.getFileHandle(rec.key)).getFile();
+        files.push(new File([f], rec.name, { type: rec.type || f.type, lastModified: rec.lastModified }));
+      } catch(e){ (e && e.name === 'NotFoundError' ? missing : failed).push(rec); }
+    }
+    return { files, missing, failed };
+  }
+
+  // Saves newly added songs into the vault. Returns the files that made it in.
+  async function persistFiles(v, files){
+    const k = kindOf(v);
+    if(k === 'link') return [];
+    const have = new Set(k === 'opfs' ? (v.songs || []).map(fkOf) : (v.files || []).map(fkOf));
+    const fresh = [];
+    for(const f of files){ const fk = fkOf(f); if(!have.has(fk)){ have.add(fk); fresh.push(f); } }   // skip songs the vault already has
+    if(!fresh.length) return [];
+    requestPersist();
+    if(k !== 'opfs'){ (v.files = v.files || []).push(...fresh); const ok = await saveVaults(); if(!ok) toast("this browser wouldn't save these songs. they'll be gone when you close the page.", 8000); return fresh; }
+    const saved = []; let failed = 0, lastErr = null;
+    try{
+      const dir = await opfsVaultDir(v, true);
+      v.songs = v.songs || [];
+      for(let i = 0; i < fresh.length; i++){
+        busy(fresh.length > 1 ? `saving ${i + 1} of ${fresh.length}…` : 'saving…');
+        const f = fresh[i], key = newKey(f.name);
+        try{ await opfsPut(v, dir, key, f); v.songs.push({ key, name: f.name, size: f.size, lastModified: f.lastModified, type: f.type }); saved.push(f); }
+        catch(e){ failed++; lastErr = e; try{ await dir.removeEntry(key); }catch(_){} }
+      }
+    } catch(e){ failed = fresh.length - saved.length; lastErr = e; }
+    busy(null);
+    if(!saved.length && failed && !(lastErr && lastErr.name === 'QuotaExceededError')){
+      // private file storage refused everything (some locked-down browsers). Fall back to the older way.
+      v.kind = 'idb'; v.files = (v.files || []).concat(fresh); if(!(v.songs && v.songs.length)) delete v.songs;
+      const ok = await saveVaults();
+      toast(ok ? 'this browser blocked private file storage, so songs are stored the older way.' : "this browser wouldn't save these songs. they'll be gone when you close the page.", 8000);
+      return fresh;
+    }
+    await saveVaults();
+    if(failed) toast(lastErr && lastErr.name === 'QuotaExceededError' ? `storage is full: ${failed} song${failed === 1 ? '' : 's'} weren't saved.` : `${failed} song${failed === 1 ? '' : 's'} couldn't be saved.`, 8000);
+    return saved;
+  }
+
+  // Older vaults keep their songs inside IndexedDB. Move them over, and only switch once every song made it.
+  async function migrateToOpfs(vault){
+    const files = vault.files || [];
+    if(!files.length || !OPFS_OK) return;
+    try{
+      const dir = await opfsVaultDir(vault, true);
+      const songs = [];
+      for(let i = 0; i < files.length; i++){
+        busy(`moving songs to safer storage ${i + 1} of ${files.length}…`);
+        const f = files[i], key = newKey(f.name);
+        await opfsPut(vault, dir, key, f);
+        songs.push({ key, name: f.name, size: f.size, lastModified: f.lastModified, type: f.type });
+      }
+      vault.songs = songs; vault.kind = 'opfs'; delete vault.files;
+      await saveVaults();
+    } catch(e){
+      await opfsDropVault(vault);
+      toast("couldn't move this vault to safer storage. it will keep working as before.", 7000);
+    }
+    busy(null);
+  }
+
+  let persisted = false;
+  async function requestPersist(){
+    try{ if(navigator.storage && navigator.storage.persist) persisted = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch(e){}
+    return persisted;
+  }
+  async function storageLine(){
+    let line = '';
+    try{ const e = await navigator.storage.estimate(); line = `${fmtBytes(e.usage || 0)} used of ${fmtBytes(e.quota || 0)}`; } catch(e){ line = 'storage size unknown'; }
+    try{ line += (await navigator.storage.persisted()) ? '\nprotected from clean-up' : '\nnot protected: the browser may clear it'; } catch(e){}
+    return line;
+  }
+
+  /* ---------- install + gentle warnings ---------- */
+  const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const IS_SAFARI = !IS_IOS && /safari/i.test(navigator.userAgent) && !/chrome|chromium|android|crios|fxios|edg/i.test(navigator.userAgent);
+  const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const installBtn = document.getElementById('installBtn'), storageTip = document.getElementById('storageTip');
+  let deferredInstall = null;
+  window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferredInstall = e; installBtn.classList.remove('hidden'); });
+  window.addEventListener('appinstalled', ()=>{ deferredInstall = null; installBtn.classList.add('hidden'); });
+  installBtn.addEventListener('click', async ()=>{
+    if(!deferredInstall) return;
+    deferredInstall.prompt();
+    try{ await deferredInstall.userChoice; }catch(e){}
+    deferredInstall = null; installBtn.classList.add('hidden');
+  });
+  function updateTip(){
+    let msg = '';
+    if(IS_IOS && !isStandalone()) msg = 'on iPhone and iPad, Safari can clear songs saved in a website after about a week unused. tap Share, then Add to Home Screen, and open looseleaf from there to keep them. you can also back a vault up from its ⋯ menu.';
+    else if(IS_SAFARI) msg = 'Safari can clear songs saved in a website after about a week unused. use File, then Add to Dock, or open looseleaf in Chrome or Edge and link a folder so nothing is copied. you can also back a vault up from its ⋯ menu.';
+    let dismissed = false; try{ dismissed = !!localStorage.getItem('looseleaf.tip'); }catch(e){}
+    storageTip.classList.toggle('hidden', !msg || dismissed);
+    storageTip.querySelector('p').textContent = msg;
+  }
+  document.getElementById('tipClose').addEventListener('click', ()=>{ try{ localStorage.setItem('looseleaf.tip', '1'); }catch(e){} storageTip.classList.add('hidden'); });
+  if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+  /* ---------- vault directory + opening a vault ---------- */
+  function renderVaultList(){
+    vaultListEl.innerHTML = '';
+    vaults.forEach(vault=>{
+      const n = songCount(vault);
+      const row = document.createElement('button');
+      row.className = 'vaultRow';
+      row.innerHTML = '<span class="vaultName"></span><span class="vaultMeta"></span>';
+      row.querySelector('.vaultName').textContent = vault.name;
+      row.querySelector('.vaultMeta').textContent = `${n} ${n===1 ? 'SONG' : 'SONGS'}` + (kindOf(vault) === 'link' ? ' · LINKED' : '');
+      row.addEventListener('click', ()=>openVault(vault));
+      vaultListEl.appendChild(row);
+    });
+  }
+
+  const vaultLinkBtn = document.getElementById('vaultLinkBtn'), vaultRetryBtn = document.getElementById('vaultRetryBtn');
+  function showVaultEmpty(msg, o){
+    o = o || {};
+    document.getElementById('vaultEmptyMsg').textContent = msg ||
+      ('this vault has no songs yet. add some and a copy is kept in this browser.' + (FSA_OK ? ' or link a folder on this device and nothing is copied.' : ''));
+    vaultAddBtn.classList.toggle('hidden', o.add === false);
+    vaultLinkBtn.classList.toggle('hidden', !(FSA_OK && o.link !== false));
+    vaultRetryBtn.classList.toggle('hidden', !o.retry);
+    vaultEmpty.classList.remove('hidden'); emptyState.classList.remove('hidden');
+  }
+
+  // A linked vault re-reads its folder every time it opens, so new files show up on their own.
+  async function openLinked(vault, live){
+    const h = vault.dirHandle;
+    const problem = (msg, o)=>{ if(live()) showVaultEmpty(msg, Object.assign({ add: false, retry: true }, o)); return null; };
+    if(!h) return problem('this vault lost its folder link. pick the folder again.', { retry: false });
+    try{
+      let p = await h.queryPermission({ mode: 'read' });
+      if(p !== 'granted') p = await h.requestPermission({ mode: 'read' });   // this tap is the user gesture browsers require
+      if(p !== 'granted') return problem('looseleaf needs permission to read that folder. tap try again, then allow.');
+      busy('reading folder…');
+      const all = await collectFilesFromDirectory(h);
+      if(!live()) return null;
+      const hidden = new Set(vault.hidden || []);
+      const list = all.filter(f => !hidden.has(fkOf(f)));
+      vault.count = list.length; saveVaults();
+      if(!list.length) return problem(all.length ? 'every song in that folder has been removed from this vault. open ⋯ to show them again.' : 'no songs found in that folder.');
+      return list;
+    } catch(e){
+      return problem(e && e.name === 'NotFoundError' ? "that folder can't be found. it may have been moved or renamed. pick it again." : "couldn't read that folder. tap try again.");
+    }
+  }
+
+  async function linkFolder(){
+    const v = currentVault; if(!v || !FSA_OK) return;
+    let h;
+    try{ h = await window.showDirectoryPicker({ id: 'looseleaf', mode: 'read' }); }
+    catch(e){ if(e && e.name === 'AbortError') return; toast("this browser wouldn't open the folder picker.", 6000); return; }
+    if(kindOf(v) === 'opfs') opfsDropVault(v);   // only reachable while the vault has no songs of its own
+    v.kind = 'link'; v.dirHandle = h; v.hidden = []; v.count = 0; delete v.songs; delete v.files;
+    const ok = await saveVaults();
+    if(!ok) toast("this browser can't remember the folder, so you'll need to pick it again next time.", 8000);
+    openVault(v);
+  }
+
+  let openToken = 0;
+  async function openVault(vault){
+    const token = ++openToken;
+    const live = () => token === openToken && currentVault === vault;
+    clearLibrary();
+    currentVault = vault;
+    setLibraryLabel(vault.name);
+    menuBtn.classList.remove('hidden');
+    directoryView.classList.add('hidden');
+    vaultEmpty.classList.add('hidden');
+    let k = kindOf(vault), files = [], lostMsg = '';
+    addBtn.classList.toggle('hidden', k === 'link');
+    try{
+      if(k === 'link'){
+        const r = await openLinked(vault, live);
+        if(!live() || !r) return;
+        files = r;
+      } else {
+        if(k === 'idb' && OPFS_OK && (vault.files || []).length){ await migrateToOpfs(vault); k = kindOf(vault); }
+        if(!live()) return;
+        if(k === 'opfs'){
+          if((vault.songs || []).length) busy('opening…');
+          const r = await opfsFiles(vault);
+          if(!live()) return;
+          files = r.files;
+          if(r.failed.length) lostMsg = `${r.failed.length} song${r.failed.length === 1 ? '' : 's'} couldn't be read just now. try opening the vault again.`;
+          if(r.missing.length){
+            vault.songs = vault.songs.filter(x => !r.missing.includes(x)); await saveVaults();
+            lostMsg = `${r.missing.length} song${r.missing.length === 1 ? ' is' : 's are'} gone from this browser's storage (browsers can clear it). add ${r.missing.length === 1 ? 'it' : 'them'} again and your order and BPM/key fixes come back.`;
+          }
+        } else files = vault.files || [];
+      }
+    } catch(e){
+      if(live()){ busy(null); showVaultEmpty("couldn't open this vault. tap try again.", { add: k !== 'link', retry: true }); }
+      return;
+    } finally { if(token === openToken) busy(null); }
+    if(!files.length){ showVaultEmpty(lostMsg || undefined, { add: true }); return; }
+    emptyState.classList.add('hidden');
+    await addFiles(files, false);
+    if(lostMsg) toast(lostMsg, 9000);
+  }
+
+  // Directory screen: the root breadcrumb plus every saved vault.
+  function showDirectory(){
+    openToken++;
+    clearLibrary();
+    currentVault = null;
+    busy(null);
+    setLibraryLabel('');
+    addBtn.classList.add('hidden'); menuBtn.classList.add('hidden'); vaultMenu.classList.add('hidden');
+    vaultEmpty.classList.add('hidden');
+    vaultNaming.classList.add('hidden');
+    vaultListEl.classList.remove('hidden');
+    createVaultBtn.classList.remove('hidden'); restoreBtn.classList.remove('hidden');
+    directoryView.classList.remove('hidden');
+    emptyState.classList.remove('hidden');
+    document.getElementById('dirNote').textContent = '';
+    dirRoot.textContent = `/ ${localStorage.getItem(NAME_KEY) || 'library'} /`;
+    renderVaultList();
+    updateTip();
+  }
+
+  function createVault(){
+    document.getElementById('dirNote').textContent = '';
+    vaultNameInput.value = '';
+    vaultNameInput.placeholder = 'e.g. late night mix';
+    vaultNaming.classList.remove('hidden');
+    vaultListEl.classList.add('hidden');
+    createVaultBtn.classList.add('hidden'); restoreBtn.classList.add('hidden');
+    vaultNameInput.focus();
+  }
+
+  async function confirmVaultName(){
+    const name = vaultNameInput.value.trim() || 'untitled vault';
+    const vault = newVault(name);
+    vaults.push(vault);
+    const saved = await saveVaults();
+    requestPersist();
+    openVault(vault);
+    if(!saved) setLibraryLabel(name + ' (not saved: browser storage blocked)');
+  }
+
+  /* ---------- loading files ---------- */
+  function bpmToDisplay(raw){
+    const n = parseFloat(raw);
+    return isFinite(n) && n>0 ? String(Math.round(n)) : raw.trim();
+  }
+
+  async function addFiles(fileList, persist=true){
+    let audioFiles = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_NAME_RE.test(f.name));
+    if(!audioFiles.length) return;
+    if(persist && currentVault){
+      const v = currentVault;
+      audioFiles = await persistFiles(v, audioFiles);
+      if(currentVault !== v || !audioFiles.length) return;
+    }
+
+    const wasEmpty = LIBRARY.length === 0;
+    const previousTrack = currentIndex >= 0 ? LIBRARY[currentIndex] : null;
+
+    const newTracks = audioFiles.map(file=>({
+      id: Date.now() + Math.random(),
+      title: titleFromFilename(file.name),
+      artist: '',
+      key: '—',
+      bpm: '—',
+      file: file,
+      url: URL.createObjectURL(file),
+      peaks: null,
+      duration: 0,
+      artUrl: null,
+      artImageEl: null,
+      _fk: fkOf(file),
+    }));
+    LIBRARY.push(...newTracks);
+
+    // Read each file's real tags/art before sorting & rendering, so the
+    // letter rail and title only update once, with accurate info in hand
+    // (these are small header reads, not full audio decodes — fast).
+    await Promise.all(newTracks.map(async track=>{
+      try{
+        const { art, tags } = await extractMetadata(track.file);
+        if(tags.title) track.title = tags.title;
+        if(tags.artist) track.artist = tags.artist;
+        if(tags.bpm) track.bpm = bpmToDisplay(tags.bpm);
+        if(tags.key) track.key = tags.key;
+        if(art) track.artUrl = URL.createObjectURL(new Blob([art.data], { type: art.mime }));
+      } catch(e){ /* no readable tags — filename title + procedural art already in place */ }
+      const c = currentVault && currentVault.meta && currentVault.meta[track._fk];   // saved values from last time
+      if(c){
+        if(c.bpm && c.bpm !== '—' && (c.bpmManual || track.bpm === '—')){ track.bpm = c.bpm; track.bpmGuess = c.bpmGuess; track.bpmLow = c.bpmLow; track.bpmManual = c.bpmManual; }
+        if(c.key && c.key !== '—' && (c.keyManual || track.key === '—')){ track.key = c.key; track.keyGuess = c.keyGuess; track.keyManual = c.keyManual; }
+        if(Array.isArray(c.cues)) track.cues = c.cues.slice(0, 4);
+        if(c.loop && c.loop.a != null) track.loop = c.loop;
+        if(c.grid != null) track.grid = c.grid;
+      }
+    }));
+
+    rebuildLettersAndSort();
+
+    if(wasEmpty){
+      emptyState.classList.add('hidden');
+      stage.classList.remove('hidden');
+      currentIndex = 0;
+      render();
+    } else if(previousTrack){
+      // the list just got re-sorted alphabetically — make sure we're still
+      // pointing at the same track that was actually playing, not whatever
+      // now sits at the old numeric index.
+      const newIndex = LIBRARY.indexOf(previousTrack);
+      if(newIndex >= 0) currentIndex = newIndex;
+      refreshChrome();
+    }
+    analyzeAll();
+  }
+
+  const fileInput = document.getElementById('fileInput');
+  document.getElementById('addBtn').addEventListener('click', ()=>fileInput.click());
+  vaultAddBtn.addEventListener('click', ()=>fileInput.click());
+  vaultLinkBtn.addEventListener('click', linkFolder);
+  vaultRetryBtn.addEventListener('click', ()=>{ if(currentVault) openVault(currentVault); });
+  document.getElementById('folderBtn').addEventListener('click', showDirectory);
+  createVaultBtn.addEventListener('click', createVault);
+  vaultNameConfirmBtn.addEventListener('click', confirmVaultName);
+  vaultNameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmVaultName(); });
+  fileInput.addEventListener('change', (e)=>{ addFiles(e.target.files); fileInput.value=''; });
+
+  function saveName(){
+    const name = nameInput.value.trim();
+    if(!name) return;
+    localStorage.setItem(NAME_KEY, name);
+    nameGate.classList.add('hidden');
+    showDirectory();
+  }
+  nameContinueBtn.addEventListener('click', saveName);
+  nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') saveName(); });
+
+  dirRoot.addEventListener('click', ()=>{
+    nameInput.value = localStorage.getItem(NAME_KEY) || '';
+    directoryView.classList.add('hidden');
+    nameGate.classList.remove('hidden');
+    nameInput.focus();
+    nameInput.select();
+  });
+
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e)=>{ e.preventDefault(); if(!currentVault || kindOf(currentVault) === 'link') return; dragDepth++; dropOverlay.classList.add('active'); });
+  window.addEventListener('dragleave', ()=>{ dragDepth--; if(dragDepth<=0){ dragDepth=0; dropOverlay.classList.remove('active'); } });
+  window.addEventListener('dragover', (e)=>e.preventDefault());
+  window.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    dragDepth = 0;
+    dropOverlay.classList.remove('active');
+    if(currentVault && kindOf(currentVault) !== 'link' && e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+
+  /* ---------- init ---------- */
+  buildLetterRail();
+
+  // Fallback for browsers without `dvh` support (iOS Safari < 15.4): measure the
+  // real visible viewport height in JS so the layout doesn't get clipped behind
+  // the address bar. Modern browsers already get this for free via `dvh` in CSS;
+  // this just backstops the older ones.
+  function setAppHeight(){
+    document.documentElement.style.setProperty('--app-vh', `${window.innerHeight * 0.01}px`);
+  }
+  setAppHeight();
+  window.addEventListener('resize', setAppHeight);
+  window.addEventListener('orientationchange', setAppHeight);
+
+  (async function init(){
+    setShuffle(recall('shuffle') === '1', false); setRepeat(recall('repeat') || 'off', false);
+    setAdvanced(recall('advanced') === '1', false);
+    { const v = parseFloat(recall('vol')); setVolume(isFinite(v) ? v : 1, false); if(volLevel > 0) lastVol = volLevel; }
+    OPFS_OK = await detectOpfs();
+    vaults = (await idbGet(VAULTS_KEY)) || [];
+    try{ if(navigator.storage && navigator.storage.persisted) persisted = await navigator.storage.persisted(); }catch(e){}
+    const savedName = localStorage.getItem(NAME_KEY);
+    if(savedName){
+      nameGate.classList.add('hidden');
+      showDirectory();
+    }
+    // else: nameGate is visible by default in the markup — nothing to do.
+  })();
+
+})();
+</script>
+</body>
+</html>
